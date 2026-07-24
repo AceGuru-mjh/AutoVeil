@@ -456,12 +456,18 @@ int main(int argc, char** argv) {
 
     auto loader = std::make_shared<ModuleLoader>(*env, bus, isolator);
     auto modulesR = loader->scanModules(env->modulesDir);
-    if (!modulesR) NX_LOG_WARN("main", "scanModules failed: %d", (int)modulesR.error());
+    if (!modulesR) {
+        NX_LOG_WARN("main", "scanModules failed: %d; skipping mount stage", (int)modulesR.error());
+    }
 
     // 选择 FS 拦截器（OverlayFS 优先，Bind Mount 降级）
     std::unique_ptr<IFileSystemInterceptor> fs = FsDetector::select(*env);
-    if (auto r = fs->mountAll(*modulesR); !r) {
-        NX_LOG_WARN("main", "mountAll failed: %d; modules may not take effect", (int)r.error());
+    if (modulesR) {
+        // 把模块清单转换为挂载目标列表（按 priority 升序）
+        auto targets = loader->collectTargets(*modulesR);
+        if (auto r = fs->mountAll(targets); !r) {
+            NX_LOG_WARN("main", "mountAll failed: %d; modules may not take effect", (int)r.error());
+        }
     }
 
     ShellExecutor shell(*env, isolator, bus);
@@ -474,7 +480,7 @@ int main(int argc, char** argv) {
     std::thread late([&] { shell.runStage(BootStage::LateStart); });
     late.detach();
 
-    bus->publish("EVENT_DAEMON_READY", {});
+    bus->publishEvent("EVENT_DAEMON_READY", {});
 
     Watchdog wd;
     wd.spawn([&] {
@@ -569,6 +575,7 @@ public:
     Result<void> unmountAll() override;
     std::string_view implName() const override { return "overlayfs"; }
 private:
+    RootEnvironment env_;              // detect() 时缓存，供 mountOverlay 使用
     std::vector<std::string> mounted_;  // 记录挂载点，便于 unmountAll
 };
 
@@ -582,7 +589,11 @@ Result<bool> OverlayFsInterceptor::detect(const RootEnvironment& env) {
     if (!env.overlayFsAvailable) return false;
     // 探针：在 tmp 上挂一个 overlay，成功即支持
     // 失败回退给 FsDetector 选择 BindMount
-    return runProbe();
+    if (runProbe()) {
+        env_ = env;   // 缓存环境，供 mountOverlay 使用
+        return true;
+    }
+    return false;
 }
 
 Result<void> OverlayFsInterceptor::mountOverlay(const MountTarget& t) {
@@ -626,6 +637,7 @@ public:
     Result<void> unmountAll() override;
     std::string_view implName() const override { return "bind"; }
 private:
+    RootEnvironment env_;            // detect() 时缓存
     std::vector<std::string> mounted_;
 };
 
@@ -635,6 +647,13 @@ private:
 **关键实现**：
 
 ```cpp
+Result<bool> BindMountInterceptor::detect(const RootEnvironment& env) {
+    // Bind mount 依赖 VFS 层，与底层 FS 无关，几乎所有内核都支持
+    // 仅需 root + CAP_SYS_ADMIN（由 SELinuxManager 已修补）
+    env_ = env;
+    return true;   // 始终可用作为降级方案
+}
+
 Result<void> BindMountInterceptor::mountOverlay(const MountTarget& t) {
     // 1) 备份原文件到 /data/adb/nexuscore/stock/<hash>
     // 2) bind mount: mount(t.source, t.target, NULL, MS_BIND | MS_REC, NULL)
@@ -960,8 +979,15 @@ Result<int> ShellExecutor::execScript(const std::string& script,
     if (pid == 0) {
         // 子进程：进入独立 Mount Namespace，避免污染全局挂载
         isolator_->enterNamespace();
-        // 设置环境变量 NEXUS_MODULE_PATH, BOOT_STAGE, NEXUS_VERSION
-        for (auto& kv : envVars) ::setenv(/*...*/);
+        // 设置环境变量 NEXUS_MODULE_PATH, BOOT_STAGE, NEXUS_VERSION 等
+        // envVars 中每个元素格式为 "KEY=VALUE"
+        for (auto& kv : envVars) {
+            auto pos = kv.find('=');
+            if (pos == std::string::npos) continue;
+            std::string key = kv.substr(0, pos);
+            std::string val = kv.substr(pos + 1);
+            ::setenv(key.c_str(), val.c_str(), 1);
+        }
         // execve /system/bin/sh -c <script>
         char* argv[] = { (char*)"sh", (char*)"-c", (char*)script.c_str(), nullptr };
         execve("/system/bin/sh", argv, environ);
@@ -969,7 +995,7 @@ Result<int> ShellExecutor::execScript(const std::string& script,
     }
     int status = 0;
     ::waitpid(pid, &status, 0);
-    bus_->publish("EVENT_SCRIPT_DONE", {{"script", script}, {"code", status}});
+    bus_->publishEvent("EVENT_SCRIPT_DONE", {{"script", script}, {"code", status}});
     return WEXITSTATUS(status);
 }
 ```

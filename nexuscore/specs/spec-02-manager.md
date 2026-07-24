@@ -163,7 +163,7 @@ import java.nio.ByteOrder
  */
 object ProtobufCodec {
 
-    private const val MAGIC: Int = 0x4E58434O  // 'NXCO'
+    private const val MAGIC: Int = 0x4E58434F  // 'NXCO'
 
     fun write(transport: IpcTransport, env: Envelope) {
         val payload = env.toByteArray()
@@ -279,7 +279,7 @@ class NexusIpcClient(
     suspend fun request(req: Request): Response {
         val seq = nextSeq++
         val env = Envelope.newBuilder()
-            .setMagic(0x4E58434O)
+            .setMagic(0x4E58434F)
             .setVersion(1)
             .setSeq(seq)
             .setRequest(req)
@@ -330,7 +330,8 @@ class NexusIpcClient(
             when (env.bodyCase) {
                 Envelope.BodyCase.RESPONSE -> {
                     val resp = env.response
-                    pendingMu.withLock { pending.remove(resp.seq)?.complete(resp) }
+                    // seq 定义在 Envelope 上（见 nexus.proto），非 Response
+                    pendingMu.withLock { pending.remove(env.seq)?.complete(resp) }
                         ?: continue   // 重复或过期响应，丢弃
                 }
                 Envelope.BodyCase.EVENT -> {
@@ -699,11 +700,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var ipc: NexusIpcClient
     private lateinit var repo: NexusRepository
 
+    /** 从 Application 获取长生命周期 scope，IPC 客户端随进程存活 */
+    private val appScope get() = (application as NexusApp).appScope
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        ipc = NexusIpcClient().also { it.start(applicationScope) }
+        ipc = NexusIpcClient().also { it.start(appScope) }
         repo = NexusRepository(ipc)
 
         setContent {
@@ -717,10 +721,6 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         ipc.stop()
     }
-
-    private val applicationScope by lazy {
-        androidScope()  // 来自 NexusApp 的 ProcessLifecycle绑定 scope
-    }
 }
 ```
 
@@ -730,9 +730,14 @@ class MainActivity : ComponentActivity() {
 package com.nexus.manager.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nexus.manager.data.NexusRepository
 import com.nexus.manager.ui.pages.*
@@ -896,13 +901,15 @@ import com.nexus.manager.viewmodel.ModulesViewModel
 fun ModulesPage(vm: ModulesViewModel) {
     val modules by vm.modules.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val pickZip = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            // 把 URI 复制到 Daemon 可读的临时路径，再传给 installModule
-            // 见 §6.5 FileBridge
+            // 把 URI 复制到 /data/local/tmp（Daemon 可读），再传路径给 installModule
+            val path = com.nexus.manager.data.FileBridge.copyToTmp(context, it)
+            if (path != null) vm.install(path)
         }
     }
 
@@ -1086,6 +1093,7 @@ private fun levelName(l: Int) = when (l) {
 ```kotlin
 package com.nexus.manager.ui.theme
 
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.graphics.Color
 
 // 深色为主，呼应系统级工具调性
