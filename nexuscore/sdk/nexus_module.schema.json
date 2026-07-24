@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexuscore.dev/schema/module-manifest-v1.json",
+  "title": "NexusCore Module Manifest (DMM)",
+  "type": "object",
+  "required": ["id", "name", "version", "author", "min_nexus_version"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$",
+      "description": "模块唯一 ID"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$" },
+    "versionCode": { "type": "integer", "minimum": 1 },
+    "author": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "maxLength": 256 },
+    "min_nexus_version": { "type": "string", "pattern": "^\\d+\\.\\d+" },
+    "priority": { "type": "integer", "minimum": -1000, "maximum": 1000 },
+    "enabled": { "type": "boolean" },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "EXECUTE_SHELL",
+          "MODIFY_SYSTEM_PROPS",
+          "MOUNT_FILESYSTEM",
+          "WRITE_DATA_DIR",
+          "NETWORK_ACCESS",
+          "ACCESS_OTHER_MODULES",
+          "REGISTER_AGENT"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "intents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action"],
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string", "minLength": 1 },
+          "priority": { "type": "integer", "minimum": 0, "default": 0 },
+          "filter": { "type": "object" }
+        }
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "homepage": { "type": "string", "format": "uri" },
+    "support": { "type": "string", "format": "uri" },
+    "donate": { "type": "string", "format": "uri" }
+  }
+}
