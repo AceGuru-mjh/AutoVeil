@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NexusCore</string>
+    <string name="nav_dashboard">状态</string>
+    <string name="nav_modules">模块</string>
+    <string name="nav_superuser">超级用户</string>
+    <string name="nav_logs">日志</string>
+    <string name="nav_settings">设置</string>
+
+    <string name="status_root">Root 状态</string>
+    <string name="status_selinux">SELinux</string>
+    <string name="status_daemon">Daemon</string>
+    <string name="status_modules">已安装模块</string>
+    <string name="status_safe_mode">安全模式</string>
+    <string name="status_fs_interceptor">文件系统</string>
+    <string name="status_uptime">运行时长</string>
+
+    <string name="action_restart">重启</string>
+    <string name="action_restart_daemon">重启 Daemon</string>
+    <string name="action_safe_mode">安全模式</string>
+    <string name="action_refresh">刷新</string>
+    <string name="action_install_zip">从本地 ZIP 安装</string>
+    <string name="action_install_repo">从存储库安装</string>
+    <string name="action_reboot_normal">正常重启</string>
+    <string name="action_reboot_userspace">软重启</string>
+    <string name="action_reboot_recovery">Recovery</string>
+    <string name="action_reboot_bootloader">Bootloader</string>
+    <string name="action_reboot_download">Download</string>
+    <string name="action_export_logs">导出日志</string>
+    <string name="action_clear_logs">清除日志</string>
+    <string name="action_uninstall">卸载</string>
+    <string name="action_enable">启用</string>
+    <string name="action_disable">禁用</string>
+
+    <string name="reboot_confirm">确认重启设备？</string>
+    <string name="safe_mode_confirm">进入安全模式后所有模块将在下次重启前不加载，确认？</string>
+    <string name="uninstall_module_confirm">确认卸载模块 %1$s？</string>
+    <string name="install_success">安装成功，重启后生效</string>
+    <string name="install_failed">安装失败</string>
+    <string name="export_success">日志已导出至 Download 目录</string>
+    <string name="export_failed">日志导出失败</string>
+
+    <string name="logs_tab_su">超级用户</string>
+    <string name="logs_tab_daemon">Daemon</string>
+    <string name="logs_level_verbose">Verbose</string>
+    <string name="logs_level_debug">Debug</string>
+    <string name="logs_level_info">Info</string>
+    <string name="logs_level_warn">Warn</string>
+    <string name="logs_level_error">Error</string>
+
+    <string name="settings_theme">主题</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_dynamic_color">动态颜色</string>
+    <string name="settings_check_update">检查更新</string>
+    <string name="settings_uninstall_nexuscore">卸载 NexusCore</string>
+    <string name="settings_about">关于</string>
+    <string name="settings_version">版本</string>
+</resources>

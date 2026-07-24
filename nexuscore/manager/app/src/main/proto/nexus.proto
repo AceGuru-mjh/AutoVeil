@@ -1,0 +1,172 @@
+syntax = "proto3";
+package nexus.ipc.v1;
+
+option java_package = "com.nexus.manager.ipc.proto";
+option java_multiple_files = true;
+
+// ============ 通用信封 ============
+message Envelope {
+  uint32 magic   = 1;  // 0x4E58434F ('NXCO')
+  uint32 version = 2;  // 1
+  uint32 seq     = 3;  // 请求序号（事件用 0）
+  oneof body {
+    Request  request  = 10;
+    Response response = 11;
+    Event    event    = 12;
+  }
+}
+
+// ============ Request ============
+message Request {
+  oneof payload {
+    PingRequest            ping              = 1;
+    GetStatusRequest       get_status        = 2;
+    ListModulesRequest     list_modules      = 3;
+    EnableModuleRequest    enable_module     = 4;
+    DisableModuleRequest   disable_module    = 5;
+    InstallModuleRequest   install_module    = 6;
+    UninstallModuleRequest uninstall_module  = 7;
+    RestartDaemonRequest   restart_daemon    = 8;
+    EnterSafeModeRequest   enter_safe_mode   = 9;
+    SubscribeLogsRequest   subscribe_logs    = 10;
+    ListSuAppsRequest      list_su_apps      = 11;
+    SetSuPolicyRequest     set_su_policy     = 12;
+    ListSuLogsRequest      list_su_logs      = 13;
+    ClearLogsRequest       clear_logs        = 14;
+    RebootRequest          reboot            = 15;
+    UninstallFrameworkRequest uninstall_framework = 16;
+  }
+}
+
+message PingRequest           { string token = 1; }
+message GetStatusRequest      {}
+message ListModulesRequest    {}
+message EnableModuleRequest   { string id = 1; }
+message DisableModuleRequest  { string id = 1; }
+message InstallModuleRequest  { string local_path = 1; }
+message UninstallModuleRequest{ string id = 1; }
+message RestartDaemonRequest  {}
+message EnterSafeModeRequest  { uint32 timeout_sec = 1; }
+message SubscribeLogsRequest  { uint32 min_level = 1; }
+message ListSuAppsRequest     {}
+message SetSuPolicyRequest {
+  string package_name = 1;
+  uint32 uid = 2;
+  enum Policy {
+    DENY = 0;
+    ALLOW = 1;
+    ALLOW_ONCE = 2;
+  }
+  Policy policy = 3;
+  uint32 timeout_sec = 4;  // 0=永久
+}
+message ListSuLogsRequest     {}
+message ClearLogsRequest      { enum Target { ALL = 0; DAEMON = 1; SU = 2; } Target target = 1; }
+message RebootRequest {
+  enum Mode {
+    NORMAL = 0;
+    USERSPACE = 1;
+    RECOVERY = 2;
+    BOOTLOADER = 3;
+    DOWNLOAD = 4;
+  }
+  Mode mode = 1;
+}
+message UninstallFrameworkRequest {}
+
+// ============ Response ============
+message Response {
+  int32 code = 1;   // 0 = OK，其他 = Err 枚举值
+  string message = 2;
+  oneof payload {
+    PingResponse            ping              = 10;
+    GetStatusResponse       get_status        = 11;
+    ListModulesResponse     list_modules      = 12;
+    EmptyResponse           empty             = 13;
+    InstallModuleResponse   install_module    = 14;
+    ListSuAppsResponse      list_su_apps      = 15;
+    ListSuLogsResponse      list_su_logs      = 16;
+  }
+}
+
+message PingResponse          { string token = 1; uint32 server_version = 2; }
+message GetStatusResponse {
+  bool root_available        = 1;
+  string root_provider       = 2;
+  string root_version        = 3;
+  bool selinux_enforcing     = 4;
+  string selinux_domain      = 5;
+  bool daemon_running        = 6;
+  uint32 daemon_pid          = 7;
+  string fs_interceptor      = 8;
+  uint32 module_count        = 9;
+  bool safe_mode             = 10;
+  uint64 uptime_ms           = 11;
+  string android_version     = 12;
+  string security_patch      = 13;
+  string kernel_version      = 14;
+  string arch                = 15;
+  string daemon_version      = 16;
+}
+message ModuleInfo {
+  string id          = 1;
+  string name        = 2;
+  string version     = 3;
+  string author      = 4;
+  string description = 5;
+  bool enabled       = 6;
+  int32  priority    = 7;
+  repeated string capabilities = 8;
+  bool has_update    = 9;
+  string update_url  = 10;
+}
+message ListModulesResponse    { repeated ModuleInfo modules = 1; }
+message EmptyResponse          {}
+message InstallModuleResponse  { string id = 1; bool need_reboot = 2; }
+
+message SuAppInfo {
+  string package_name = 1;
+  uint32 uid = 2;
+  enum Policy {
+    DENY = 0;
+    ALLOW = 1;
+    ALLOW_ONCE = 2;
+  }
+  Policy policy = 3;
+  uint64 last_request_ms = 4;
+  uint32 request_count = 5;
+  uint32 timeout_sec = 6;  // 0=永久
+}
+message ListSuAppsResponse     { repeated SuAppInfo apps = 1; }
+
+message SuLogEntry {
+  uint64 timestamp_ms = 1;
+  string package_name = 2;
+  uint32 uid = 3;
+  bool granted = 4;
+  string command = 5;
+}
+message ListSuLogsResponse     { repeated SuLogEntry entries = 1; }
+
+// ============ Event ============
+message Event {
+  string name = 1;
+  uint64 timestamp_ms = 2;
+  oneof payload {
+    LogLineEvent       log_line       = 10;
+    ModuleLoadedEvent  module_loaded  = 11;
+    ScriptDoneEvent    script_done    = 12;
+    DaemonReadyEvent   daemon_ready   = 13;
+    SuRequestEvent     su_request     = 14;
+  }
+}
+message LogLineEvent      { uint32 level = 1; string tag = 2; string msg = 3; }
+message ModuleLoadedEvent { string id = 1; }
+message ScriptDoneEvent   { string script = 1; int32 code = 2; }
+message DaemonReadyEvent  {}
+message SuRequestEvent {
+  string package_name = 1;
+  uint32 uid = 2;
+  uint32 pid = 3;
+  string command = 4;
+}
