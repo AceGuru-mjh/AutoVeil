@@ -2,14 +2,14 @@ name: Build NexusCore Manager APK
 
 on:
   push:
-    branches: [ main, 'trae/**' ]
+    branches: [ main, 'feat/**', 'trae/**' ]
     paths:
-      - 'manager/**'
+      - 'nexuscore/manager/**'
       - '.github/workflows/build-apk.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'manager/**'
+      - 'nexuscore/manager/**'
       - '.github/workflows/build-apk.yml'
   workflow_dispatch:
 
@@ -42,26 +42,21 @@ jobs:
             platforms;android-35
             build-tools;35.0.0
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.10.2'
-
       - name: Grant execute permission for gradlew
-        working-directory: manager
+        working-directory: nexuscore/manager
         run: chmod +x ./gradlew
 
       - name: Build debug APK
-        working-directory: manager
+        working-directory: nexuscore/manager
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Build release APK (no signing)
-        working-directory: manager
+        working-directory: nexuscore/manager
         run: ./gradlew :app:assembleRelease --no-daemon -x lintVitalRelease || true
 
       - name: Locate APKs
         id: locate
-        working-directory: manager
+        working-directory: nexuscore/manager
         run: |
           set -e
           DEBUG_APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1 || true)
@@ -78,7 +73,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nexuscore-manager-debug-apk
-          path: manager/app/build/outputs/apk/debug/*.apk
+          path: nexuscore/manager/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -87,7 +82,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nexuscore-manager-release-apk
-          path: manager/app/build/outputs/apk/release/*.apk
+          path: nexuscore/manager/app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
           retention-days: 30
 
@@ -97,7 +92,7 @@ jobs:
         with:
           name: build-reports
           path: |
-            manager/app/build/reports/
-            manager/build/reports/
+            nexuscore/manager/app/build/reports/
+            nexuscore/manager/build/reports/
           if-no-files-found: ignore
           retention-days: 7
