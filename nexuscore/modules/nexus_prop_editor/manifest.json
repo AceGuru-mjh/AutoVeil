@@ -1,0 +1,20 @@
+{
+  "id": "nexus_prop_editor",
+  "name": "NexusProp Editor",
+  "version": "1.0.0",
+  "versionCode": 1,
+  "author": "NexusCore Team",
+  "description": "安全修改 build.prop 中的 ro.debuggable / ro.secure 属性",
+  "min_nexus_version": "1.0",
+  "priority": 100,
+  "enabled": true,
+  "capabilities": [
+    "EXECUTE_SHELL",
+    "MODIFY_SYSTEM_PROPS",
+    "MOUNT_FILESYSTEM"
+  ],
+  "intents": [
+    { "action": "SYSTEM_BOOT_COMPLETED", "priority": 10 }
+  ],
+  "homepage": "https://github.com/AceGuru-mjh/AutoVeil"
+}
