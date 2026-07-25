@@ -3,11 +3,9 @@
 //! 作为 init service 启动，attach 到 zygote，监听 fork 事件，
 //! 按需注入 hook 模块到 fork 出的子进程。
 
-use nexushook::{PtraceInjector, HookTable, CompanionManager, DenyList};
-use std::path::PathBuf;
+use nexushook::{ZygoteWatcher, DenyList};
 use std::process;
 
-const ZYGOTE_PID: i32 = 1;   // MVP 占位，实际应从 /proc 解析
 const HOOK_MODULES_DIR: &str = "/data/adb/nexuscore/hook_modules";
 const COMPANION_SOCKET_DIR: &str = "/data/adb/nexuscore/hook_sockets";
 
@@ -27,74 +25,92 @@ fn main() {
         eprintln!("loaded {} denylist entries", denylist.packages().len());
     }
 
-    // 2. 加载所有 hook 模块
-    let mut hook_tables: Vec<(String, HookTable, PathBuf)> = Vec::new();
-    if let Ok(mods) = std::fs::read_dir(HOOK_MODULES_DIR) {
-        for entry in mods.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let module_id = entry.file_name().to_string_lossy().to_string();
-            let hook_toml = path.join("hook.toml");
-            let so_path = path.join("module.so");
-            if !hook_toml.exists() || !so_path.exists() {
-                eprintln!("skip {}: missing hook.toml or module.so", module_id);
-                continue;
-            }
-            match std::fs::read_to_string(&hook_toml) {
-                Ok(content) => {
-                    match HookTable::parse_toml(&content) {
-                        Ok(table) => {
-                            let warnings = table.validate();
-                            for w in &warnings {
-                                eprintln!("warning: [{}] {}", module_id, w);
-                            }
-                            if warnings.is_empty() {
-                                hook_tables.push((module_id.clone(), table, so_path));
-                                eprintln!("loaded hook module: {} ({} entries)",
-                                          module_id, hook_tables.last().unwrap().1.entries.len());
-                            }
-                        }
-                        Err(e) => eprintln!("error: parse hook.toml for {}: {}", module_id, e),
-                    }
-                }
-                Err(e) => eprintln!("error: read hook.toml for {}: {}", module_id, e),
-            }
-        }
-    }
-    eprintln!("loaded {} hook module(s) total", hook_tables.len());
+    // 2. 初始化 ZygoteWatcher
+    let mut watcher = ZygoteWatcher::new(COMPANION_SOCKET_DIR);
 
-    // 3. 启动 companion 管理器
-    let companions = CompanionManager::new(COMPANION_SOCKET_DIR);
-    for (id, _, so_path) in &hook_tables {
-        if let Err(e) = companions.start(id, so_path.clone()) {
-            eprintln!("error: start companion for {}: {}", id, e);
+    // 复制 denylist（DenyList 没有实现 Clone，重新构造）
+    // 实际实现：让 ZygoteWatcher 持有 denylist 引用或移入
+    // 简化：把 denylist 配置传给 watcher
+    for pkg in denylist.packages() {
+        watcher.denylist.add_package(pkg);
+    }
+    for &uid in denylist.uids() {
+        watcher.denylist.add_uid(uid);
+    }
+
+    // 3. 加载所有 hook 模块
+    match watcher.load_modules(HOOK_MODULES_DIR) {
+        Ok(()) => {
+            eprintln!("loaded {} hook module(s) total", watcher.hook_modules.len());
+        }
+        Err(e) => {
+            eprintln!("error loading hook modules: {}", e);
         }
     }
 
-    // 4. attach 到 zygote
-    // MVP：暂不实际 attach（需要 root + 特定 SELinux 域）
-    // 实际生产代码会调用 PtraceInjector::attach(ZYGOTE_PID)
-    eprintln!("would attach to zygote pid={}", ZYGOTE_PID);
-    let _injector: Option<PtraceInjector> = None;
+    // 4. 查找 zygote PID
+    let zygote_pid = match find_zygote_pid() {
+        Some(pid) => {
+            eprintln!("found zygote pid={}", pid);
+            pid
+        }
+        None => {
+            eprintln!("error: zygote process not found");
+            // 不立即退出，进入 sleep 循环让 init 重启
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(60));
+            }
+            #[allow(unreachable_code)]
+            process::exit(1);
+        }
+    };
 
-    // 5. 主循环：监听 zygote fork
-    // TODO: PTRACE_LISTEN + fork event 监听
-    // 每当 zygote fork 出新进程：
-    //   a. 读取子进程的 cmdline 拿包名
-    //   b. 检查 denylist，命中则 unshare(NEWPID|NEWNET) 隔离
-    //   c. 未命中 denylist 且有匹配的 hook，则通过 ptrace + dlopen 注入
-    eprintln!("entering main loop");
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(60));
-        // MVP 占位
+    // 5. 启动 zygote 监听
+    eprintln!("starting zygote watcher");
+    if let Err(e) = watcher.start(zygote_pid) {
+        eprintln!("error: zygote watcher failed: {}", e);
+        process::exit(1);
     }
 
     // 永远到不了这里
-    #[allow(unreachable_code)]
-    {
-        drop(companions);
-        process::exit(0);
+    process::exit(0);
+}
+
+/// 查找 zygote 进程 PID
+///
+/// Android 有两个 zygote 进程：zygote (32-bit) 和 zygote64 (64-bit)
+/// NexusHook 只注入 zygote64（arm64-v8a）
+fn find_zygote_pid() -> Option<i32> {
+    // 方法 1：扫描 /proc/*/comm 找 zygote64
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            let pid: i32 = entry.file_name().to_string_lossy()
+                .parse().ok()?;
+            let comm = std::fs::read_to_string(format!("/proc/{}/comm", pid)).ok()?;
+            let comm = comm.trim();
+            if comm == "zygote64" || comm == "main" {
+                // 进一步检查 cmdline
+                let cmdline = std::fs::read_to_string(format!("/proc/{}/cmdline", pid)).ok()?;
+                let name = cmdline.split('\0').next().unwrap_or("");
+                if name.contains("zygote64") || name == "zygote64" {
+                    return Some(pid);
+                }
+            }
+        }
     }
+    // 方法 2：用 pgrep（如果可用）
+    let r = std::process::Command::new("pgrep")
+        .args(&["-f", "zygote64"])
+        .output();
+    if let Ok(out) = r {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(first_line) = s.lines().next() {
+                if let Ok(pid) = first_line.parse() {
+                    return Some(pid);
+                }
+            }
+        }
+    }
+    None
 }

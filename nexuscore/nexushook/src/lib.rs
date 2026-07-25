@@ -38,8 +38,11 @@ pub mod denylist;
 pub mod ipc;
 pub mod selinux;
 pub mod util;
+pub mod zygote_watcher;
+pub mod companion_process;
 
 pub use ptrace_injector::PtraceInjector;
 pub use hook_table::{HookTable, HookEntry, HookTarget};
 pub use companion::CompanionManager;
 pub use denylist::DenyList;
+pub use zygote_watcher::ZygoteWatcher;

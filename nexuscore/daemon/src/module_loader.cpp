@@ -2,6 +2,9 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#include <algorithm>
+#include <cerrno>
+#include <cstdlib>
 #include <dirent.h>
 #include <regex>
 #include <sys/stat.h>
@@ -138,9 +141,23 @@ struct JsonParser {
     bool parseNumber(JsonValue& out) {
         size_t start = i;
         if (s[i] == '-') ++i;
+        size_t digits_start = i;
         while (i < s.size() && (s[i] >= '0' && s[i] <= '9')) ++i;
+        // Phase 1.2 修复：std::stoll 在 -fno-exceptions 下抛 std::terminate。
+        // 改用 strtoll + errno 检查。
+        if (i == digits_start) {
+            // 单独的 '-' 不是合法数字
+            return false;
+        }
+        std::string numstr = s.substr(start, i - start);
+        errno = 0;
+        char* end = nullptr;
+        long long v = std::strtoll(numstr.c_str(), &end, 10);
+        if (end == numstr.c_str() || *end != '\0' || errno == ERANGE) {
+            return false;
+        }
         out.type = JsonValue::Int;
-        out.intVal = std::stoll(s.substr(start, i - start));
+        out.intVal = v;
         return true;
     }
 };
@@ -149,12 +166,12 @@ struct JsonParser {
 
 Result<ModuleManifest> ModuleLoader::parseManifest(const std::string& path) {
     auto content = readFile(path);
-    if (!content) return std::unexpected(Err::NotFound);
+    if (!content) return {unexpect, Err::NotFound};
 
     JsonParser p(*content);
     JsonValue root;
     if (!p.parse(root) || root.type != JsonValue::Object) {
-        return std::unexpected(Err::InvalidArg);
+        return {unexpect, Err::InvalidArg};
     }
 
     ModuleManifest m;
@@ -178,17 +195,30 @@ Result<ModuleManifest> ModuleLoader::parseManifest(const std::string& path) {
 
     // 必填字段校验
     if (m.id.empty() || m.name.empty() || m.version.empty() || m.author.empty()) {
-        return std::unexpected(Err::InvalidArg);
+        return {unexpect, Err::InvalidArg};
     }
     if (!isValidId(m.id)) {
-        return std::unexpected(Err::InvalidArg);
+        return {unexpect, Err::InvalidArg};
     }
     return m;
 }
 
-bool ModuleLoader::isValidId(const std::string& id) {
-    static const std::regex re("^[a-z][a-z0-9_]{2,63}$");
-    return std::regex_match(id, re);
+bool ModuleLoader::isValidIdStatic(const std::string& id) {
+    // Phase 1.3 修复：原用 std::regex，性能差且 <regex> 在某些 NDK 上体积大。
+    // 改用手写校验：与 spec-03 §2.3 的正则 ^[a-z][a-z0-9_]{2,63}$ 等价。
+    if (id.empty()) return false;
+    // 第一个字符必须是 a-z
+    char first = id[0];
+    if (first < 'a' || first > 'z') return false;
+    // 总长度 3-64 字符（第一个 + 至少 2 个 + 最多 63 个）
+    if (id.size() < 3 || id.size() > 64) return false;
+    // 其余字符必须是 a-z / 0-9 / _
+    for (size_t i = 1; i < id.size(); ++i) {
+        char c = id[i];
+        bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+        if (!ok) return false;
+    }
+    return true;
 }
 
 std::vector<std::string> ModuleLoader::listSystemFiles(const std::string& modulePath) {
@@ -229,7 +259,7 @@ Result<std::vector<ModuleLoader::LoadedModule>> ModuleLoader::scanModules() {
     }
 
     DIR* d = ::opendir(modulesDir_.c_str());
-    if (!d) return std::unexpected(Err::IoError);
+    if (!d) return {unexpect, Err::IoError};
     struct dirent* e;
     while ((e = ::readdir(d))) {
         std::string name = e->d_name;

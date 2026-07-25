@@ -89,18 +89,23 @@ void vwrite(Level level, const char* tag, const char* fmt, va_list ap) {
         now.time_since_epoch()) % 1000;
     struct tm tm{};
     ::localtime_r(&t, &tm);
-    n += std::snprintf(buf + n, sizeof(buf) - n,
-                       "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [%s] [%s] ",
-                       tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                       tm.tm_hour, tm.tm_min, tm.tm_sec, (int)ms.count(),
-                       levelStr(level), tag);
+    // Phase 1.7 修复：原代码未检查 snprintf 返回值，-1 会让 buf+n 越界
+    int wrote = std::snprintf(buf + n, sizeof(buf) - n,
+                              "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [%s] [%s] ",
+                              tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                              tm.tm_hour, tm.tm_min, tm.tm_sec, (int)ms.count(),
+                              levelStr(level), tag ? tag : "");
+    if (wrote < 0) return;
+    n += wrote;
+    if (n >= (int)sizeof(buf)) n = sizeof(buf) - 1;
 
     // 用户消息
-    n += std::vsnprintf(buf + n, sizeof(buf) - n, fmt, ap);
-    if (n < 0) return;
+    wrote = std::vsnprintf(buf + n, sizeof(buf) - n, fmt, ap);
+    if (wrote < 0) return;
+    n += wrote;
     if (n >= (int)sizeof(buf)) n = sizeof(buf) - 1;
     buf[n] = '\0';
-    if (buf[n - 1] != '\n') {
+    if (n > 0 && buf[n - 1] != '\n') {
         if (n + 1 < (int)sizeof(buf)) {
             buf[n] = '\n';
             buf[n + 1] = '\0';
@@ -123,10 +128,6 @@ void vwrite(Level level, const char* tag, const char* fmt, va_list ap) {
     // host 测试时输出到 stderr
     std::fprintf(stderr, "%s", buf);
 #endif
-
-    // 推送到事件总线（让 Manager LogsPage 看到实时日志）
-    // 注意：globalBus 在 main.cpp 创建，这里调用是安全的（若 bus 未初始化，no-op）
-    // 实际实现通过 log::write hook 注入到 bus，详见 daemon_core.cpp
 }
 
 void write(Level level, const char* tag, const char* fmt, ...) {

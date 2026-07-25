@@ -2,10 +2,15 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstring>
+#include <cstdlib>
 #include <fcntl.h>
+#include <poll.h>
+#include <sched.h>
+#include <sys/mount.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -79,30 +84,53 @@ ScriptExecutor::ExecResult ScriptExecutor::execute(const ExecOptions& opts) {
         return result;
     }
 
-    // 写 shim 到临时文件
+    // Phase 1.3 / 1.6 修复：
+    // - shimPath 用 mkstemp 防止 TOCTOU
+    // - cmd 变量删除（未使用）
+    // - pipe2 失败时正确关闭已分配的 fd
+    // - 用 execve 而非 sh -c "string"，路径作为 argv 元素传递（防 shell 注入）
+    // - 用 poll 同时读 stdout/stderr（防死锁）
+    // - 用 alarm + waitpid 实现超时（防脚本卡死）
+
+    // 写 shim 到临时文件（用 mkstemp 防止 TOCTOU）
     std::string tmpDir = "/data/adb/nexuscore/tmp";
     mkdirRecursive(tmpDir, 0755);
-    std::string shimPath = tmpDir + "/shim_" + opts.moduleId + "_" +
-                           std::to_string((long)::getpid()) + ".sh";
-    std::string shim = buildShimScript(opts);
-    if (!writeFile(shimPath, shim, 0755)) {
+    std::string shimTemplate = tmpDir + "/shim_XXXXXX.sh";
+    std::vector<char> shimBuf(shimTemplate.begin(), shimTemplate.end());
+    shimBuf.push_back('\0');
+    int shimFd = ::mkostemp(shimBuf.data(), O_CLOEXEC);
+    if (shimFd < 0) {
         result.exitCode = -1;
-        result.stderr_ = "failed to write shim";
+        result.stderr_ = "mkstemp failed";
         return result;
     }
-
-    // 构造完整命令：source shim; source script
-    std::string cmd = "/system/bin/sh -c '"
-                     ". " + shimPath + "; "
-                     ". " + opts.scriptPath + "'";
+    std::string shimPath = shimBuf.data();
+    std::string shim = buildShimScript(opts);
+    if (::write(shimFd, shim.data(), shim.size()) != (ssize_t)shim.size()) {
+        ::close(shimFd);
+        ::unlink(shimPath.c_str());
+        result.exitCode = -1;
+        result.stderr_ = "write shim failed";
+        return result;
+    }
+    ::close(shimFd);
+    ::chmod(shimPath.c_str(), 0755);
 
     // fork
     int outPipe[2] = {-1, -1};
     int errPipe[2] = {-1, -1};
-    if (::pipe2(outPipe, O_CLOEXEC) < 0 || ::pipe2(errPipe, O_CLOEXEC) < 0) {
+    if (::pipe2(outPipe, O_CLOEXEC) < 0) {
         ::unlink(shimPath.c_str());
         result.exitCode = -1;
-        result.stderr_ = "pipe2 failed";
+        result.stderr_ = "pipe2 outPipe failed";
+        return result;
+    }
+    if (::pipe2(errPipe, O_CLOEXEC) < 0) {
+        // Phase 1.3 修复：原代码此处未关闭 outPipe，造成 fd 泄漏
+        ::close(outPipe[0]); ::close(outPipe[1]);
+        ::unlink(shimPath.c_str());
+        result.exitCode = -1;
+        result.stderr_ = "pipe2 errPipe failed";
         return result;
     }
 
@@ -128,7 +156,10 @@ ScriptExecutor::ExecResult ScriptExecutor::execute(const ExecOptions& opts) {
                          opts.moduleId.c_str(), ::strerror(errno));
             } else {
                 // 私有挂载传播，避免影响父进程
-                ::mount("", "/", "", MS_PRIVATE | MS_REC, nullptr);
+                // Phase 1.3 修复：检查 mount 返回值
+                if (::mount("", "/", "", MS_PRIVATE | MS_REC, nullptr) < 0) {
+                    NX_LOG_W("ScriptExec", "MS_PRIVATE|MS_REC failed: %s", ::strerror(errno));
+                }
             }
         }
 
@@ -141,29 +172,108 @@ ScriptExecutor::ExecResult ScriptExecutor::execute(const ExecOptions& opts) {
             ::putenv(::strdup(e.c_str()));
         }
 
-        ::execl("/system/bin/sh", "sh", "-c",
-                (". " + shimPath + "; . " + opts.scriptPath).c_str(),
-                nullptr);
+        // Phase 1.3 修复：原用 sh -c ". <shimPath>; . <scriptPath>" 拼接字符串，
+        // 路径含特殊字符（空格、$、;）会被 shell 解释，造成注入。
+        // 改用 execve + 显式 argv：sh -c '. "$1"; . "$2"' -- <shimPath> <scriptPath>
+        // 这样路径作为 argv[1]/argv[2] 传入，shell 不会再次解析。
+        const char* shArgs[] = {
+            "sh", "-c",
+            ". \"$1\"; . \"$2\"",
+            "--",
+            shimPath.c_str(),
+            opts.scriptPath.c_str(),
+            nullptr,
+        };
+        ::execv("/system/bin/sh", const_cast<char* const*>(shArgs));
         ::_exit(127);
     }
 
     ::close(outPipe[1]); ::close(errPipe[1]);
 
-    // 读 stdout/stderr（同时记录到日志）
-    // MVP 简化：先读完再 wait，生产应同时 epoll 两个 fd
-    auto readAll = [](int fd, std::string& out) {
+    // Phase 1.6 修复：用 poll 同时读 stdout/stderr，防止死锁
+    // 原代码先 readAll(outPipe) 再 readAll(errPipe)，stderr 满时子进程阻塞 → 父进程死锁
+    auto readAvailable = [](int fd, std::string& out) {
         char buf[4096];
         ssize_t n;
         while ((n = ::read(fd, buf, sizeof(buf))) > 0) {
             out.append(buf, n);
+            if (out.size() > 256 * 1024) {
+                // 限制单流最大 256 KiB，防止恶意脚本耗尽内存
+                out.append("[truncated]");
+                break;
+            }
         }
     };
-    readAll(outPipe[0], result.stdout_);
-    readAll(errPipe[0], result.stderr_);
-    ::close(outPipe[0]); ::close(errPipe[0]);
 
+    // 同时 poll 两个 fd，直到都 EOF
+    bool outOpen = true, errOpen = true;
+    while (outOpen || errOpen) {
+        struct pollfd pfds[2];
+        int nfds = 0;
+        if (outOpen) { pfds[nfds].fd = outPipe[0]; pfds[nfds].events = POLLIN; nfds++; }
+        if (errOpen) { pfds[nfds].fd = errPipe[0]; pfds[nfds].events = POLLIN; nfds++; }
+        if (nfds == 0) break;
+        int pr = ::poll(pfds, nfds, 30000);   // 30 秒无数据超时
+        if (pr < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (pr == 0) {
+            // 30 秒无数据，检查子进程是否还活着
+            int status;
+            pid_t r = ::waitpid(pid, &status, WNOHANG);
+            if (r != 0) break;   // 子进程已退出
+            // 否则继续等
+            continue;
+        }
+        for (int i = 0; i < nfds; ++i) {
+            if (pfds[i].revents & POLLIN) {
+                char buf[4096];
+                ssize_t n = ::read(pfds[i].fd, buf, sizeof(buf));
+                if (n > 0) {
+                    if (pfds[i].fd == outPipe[0]) {
+                        result.stdout_.append(buf, n);
+                        if (result.stdout_.size() > 256 * 1024) {
+                            result.stdout_.append("[truncated]");
+                            ::close(outPipe[0]); outOpen = false;
+                        }
+                    } else {
+                        result.stderr_.append(buf, n);
+                        if (result.stderr_.size() > 256 * 1024) {
+                            result.stderr_.append("[truncated]");
+                            ::close(errPipe[0]); errOpen = false;
+                        }
+                    }
+                } else {
+                    // EOF
+                    if (pfds[i].fd == outPipe[0]) { ::close(outPipe[0]); outOpen = false; }
+                    else { ::close(errPipe[0]); errOpen = false; }
+                }
+            }
+            if (pfds[i].revents & (POLLHUP | POLLERR | POLLNVAL)) {
+                if (pfds[i].fd == outPipe[0]) { ::close(outPipe[0]); outOpen = false; }
+                else { ::close(errPipe[0]); errOpen = false; }
+            }
+        }
+    }
+    if (outOpen) ::close(outPipe[0]);
+    if (errOpen) ::close(errPipe[0]);
+
+    // Phase 1.6：实现超时（默认 120 秒）
     int status = 0;
-    ::waitpid(pid, &status, 0);
+    int waited = 0;
+    while (::waitpid(pid, &status, WNOHANG) == 0) {
+        if (waited >= opts.timeoutSec) {
+            NX_LOG_W("ScriptExec", "[%s/%s] timeout after %ds, SIGKILL",
+                     opts.moduleId.c_str(), stageName(opts.stage), opts.timeoutSec);
+            ::kill(pid, SIGKILL);
+            result.timedOut = true;
+            ::waitpid(pid, &status, 0);
+            break;
+        }
+        ::sleep(1);
+        ++waited;
+    }
     result.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
     ::unlink(shimPath.c_str());
@@ -177,8 +287,9 @@ ScriptExecutor::ExecResult ScriptExecutor::execute(const ExecOptions& opts) {
         NX_LOG_W("ScriptExec", "[%s/%s] stderr: %s",
                  opts.moduleId.c_str(), stageName(opts.stage), result.stderr_.c_str());
     }
-    NX_LOG_I("ScriptExec", "[%s/%s] exit=%d",
-             opts.moduleId.c_str(), stageName(opts.stage), result.exitCode);
+    NX_LOG_I("ScriptExec", "[%s/%s] exit=%d%s",
+             opts.moduleId.c_str(), stageName(opts.stage), result.exitCode,
+             result.timedOut ? " (TIMEOUT)" : "");
 
     return result;
 }

@@ -7,8 +7,12 @@
 #ifdef __ANDROID__
 #include <cutils/properties.h>
 #endif
+#include <algorithm>
 #include <chrono>
+#include <dirent.h>
 #include <sys/reboot.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #ifndef NEXUS_VERSION
@@ -16,6 +20,37 @@
 #endif
 
 namespace nexus {
+
+// ============ 安全工具：递归删除目录（不用 shell rm -rf） ============
+// Phase 1.3 修复：原 uninstallModule 用 execCommand("rm -rf '" + path + "'")
+// 存在 shell 注入风险（路径含单引号即可逃逸）。改用 nftw 风格的递归 unlink。
+namespace {
+
+bool removeRecursive(const std::string& path) {
+    struct stat st{};
+    if (::lstat(path.c_str(), &st) != 0) {
+        return errno == ENOENT;   // 不存在视为成功
+    }
+    if (S_ISDIR(st.st_mode)) {
+        DIR* d = ::opendir(path.c_str());
+        if (!d) return false;
+        struct dirent* e;
+        while ((e = ::readdir(d))) {
+            std::string name = e->d_name;
+            if (name == "." || name == "..") continue;
+            if (!removeRecursive(path + "/" + name)) {
+                ::closedir(d);
+                return false;
+            }
+        }
+        ::closedir(d);
+        return ::rmdir(path.c_str()) == 0;
+    } else {
+        return ::unlink(path.c_str()) == 0;
+    }
+}
+
+} // anonymous namespace
 
 DaemonCore::DaemonCore(RootEnvironment env)
     : env_(std::move(env)),
@@ -105,7 +140,7 @@ Result<void> DaemonCore::start() {
     // 5. 注册 boot_completed 监听
     watchBootCompleted();
 
-    running_ = true;
+    running_.store(true);
     NX_LOG_I("DaemonCore", "started");
     return {};
 }
@@ -114,18 +149,20 @@ Result<void> DaemonCore::startReadOnly() {
     readOnly_ = true;
     NX_LOG_W("DaemonCore", "starting in READ-ONLY mode (no mount, no scripts)");
     fs_ = std::make_unique<NoopInterceptor>();
-    running_ = true;
+    running_.store(true);
     return {};
 }
 
 void DaemonCore::stop() {
     NX_LOG_I("DaemonCore", "stopping");
-    running_ = false;
+    running_.store(false);
     if (fs_) {
         fs_->unmountAll();
     }
+    // Phase 1.4 修复：原代码 detach 而非 join，导致 bootWatcher_ 线程在 DaemonCore
+    // 析构后仍访问成员 → UAF。改为 join（waitBootCompleted 的 sleep(1) 让最多 1s 退出）
     if (bootWatcher_.joinable()) {
-        bootWatcher_.detach();
+        bootWatcher_.join();
     }
     NX_LOG_I("DaemonCore", "stopped");
 }
@@ -145,7 +182,7 @@ void DaemonCore::watchBootCompleted() {
     bootWatcher_ = std::thread([this]{
         // 轮询 sys.boot_completed=1
         // 生产应使用 property_set 等待，但简化用轮询
-        while (running_) {
+        while (running_.load()) {
             char val[32] = {0};
 #ifdef __ANDROID__
             ::property_get("sys.boot_completed", val, "0");
@@ -212,70 +249,105 @@ bool DaemonCore::disableModule(const std::string& id) {
 }
 
 Result<DaemonCore::InstallResult> DaemonCore::installModule(const std::string& localZipPath) {
-    // MVP 简化：解压 + 解析 manifest + 移动到 modules/
-    // 完整流程见 spec-03 §8
-    NX_LOG_I("DaemonCore", "installing module from %s", localZipPath.c_str());
-    std::string tmpDir = "/data/adb/nexuscore/tmp/install_" + std::to_string(::getpid());
-    mkdirRecursive(tmpDir, 0755);
+    // Phase 1.3 修复：原实现用 ZIP 文件名作为模块 ID，且通过 execCommand("unzip '...")
+    // 与 execCommand("rm -rf '...") 存在 shell 注入漏洞。
+    //
+    // 新实现：
+    // 1. 校验 ZIP 路径不含单引号（基础防御）
+    // 2. 用 mkdtemp 创建不可预测的临时目录（防 TOCTOU）
+    // 3. 用 execCommand 安全调用 unzip（路径不含 ' 即可，因为单引号是唯一可逃逸字符）
+    // 4. 复用 ModuleLoader::parseManifestPublic 解析 manifest 拿到合法 ID
+    // 5. 校验 ID 通过 isValidIdStatic（防注入到后续路径构造）
+    // 6. 用 ::rename 移动目录（C API，不走 shell）
+    // 7. 清理临时目录用 removeRecursive（C API，不走 shell）
 
+    NX_LOG_I("DaemonCore", "installing module from %s", localZipPath.c_str());
+
+    // 基础防御：拒绝含单引号的路径（防 shell 注入）
+    if (localZipPath.find('\'') != std::string::npos) {
+        NX_LOG_E("DaemonCore", "reject zip path with single quote: %s", localZipPath.c_str());
+        return {unexpect, Err::InvalidArg};
+    }
+
+    // 用 mkdtemp 创建不可预测的临时目录
+    std::string tmpTemplate = "/data/adb/nexuscore/tmp/install_XXXXXX";
+    mkdirRecursive("/data/adb/nexuscore/tmp", 0700);
+    std::vector<char> tmpBuf(tmpTemplate.begin(), tmpTemplate.end());
+    tmpBuf.push_back('\0');
+    char* tmpDirC = ::mkdtemp(tmpBuf.data());
+    if (!tmpDirC) {
+        NX_LOG_E("DaemonCore", "mkdtemp failed: %s", ::strerror(errno));
+        return {unexpect, Err::IoError};
+    }
+    std::string tmpDir = tmpDirC;
+
+    // 安全调用 unzip（路径已校验无单引号）
     std::string cmd = "unzip -o '" + localZipPath + "' -d '" + tmpDir + "' 2>&1";
     auto r = execCommand(cmd, 60);
     if (r.exitCode != 0) {
         NX_LOG_E("DaemonCore", "unzip failed: %s", r.stderr_.c_str());
-        return std::unexpected(Err::IoError);
+        removeRecursive(tmpDir);
+        return {unexpect, Err::IoError};
     }
 
-    // 解析 manifest
+    // 复用 ModuleLoader 解析 manifest
     std::string manifestPath = tmpDir + "/manifest.json";
-    auto mr = [&]() -> Result<ModuleManifest> {
-        // 复用 ModuleLoader 的 parseManifest
-        ModuleLoader loader(env_, env_.modulesDir);
-        // parseManifest 是 private，这里用 shell out 简化
-        auto content = readFile(manifestPath);
-        if (!content) return std::unexpected(Err::InvalidArg);
-        // 简化：直接用 regex 提取 id（生产应换 ModuleLoader 的 parser）
-        std::string id;
-        // 直接调 execCommand 跑 python 不靠谱，这里硬解析
-        // ... [省略复杂 JSON 解析，复用 module_loader.cpp 的 JsonParser 即可]
-        // 由于 module_loader.cpp 的 JsonParser 是 anonymous namespace 的，
-        // 这里复用 ModuleLoader::scanModules 间接验证：把 tmpDir 临时作为 modulesDir
-        return std::unexpected(Err::Unsupported);
-    }();
-
-    // 简化：直接移动 tmpDir 到 modules/<inferred_id>
-    // 完整实现需要解析 manifest 拿到 id
-    NX_LOG_W("DaemonCore", "install: manifest parsing not fully implemented; using tmp dir name as id");
-    // 取 ZIP 文件名作为 id 的近似（不严格）
-    size_t slash = localZipPath.find_last_of('/');
-    std::string fname = (slash != std::string::npos) ? localZipPath.substr(slash + 1) : localZipPath;
-    // 移除 .zip 后缀和 nexus_ 前缀
-    if (fname.size() > 4 && fname.substr(fname.size() - 4) == ".zip") {
-        fname = fname.substr(0, fname.size() - 4);
+    ModuleLoader loader(env_, env_.modulesDir);
+    auto mr = loader.parseManifest(manifestPath);
+    if (!mr) {
+        NX_LOG_E("DaemonCore", "manifest parse failed: %s", errString(mr.error()));
+        removeRecursive(tmpDir);
+        return {unexpect, mr.error()};
     }
-    if (fname.rfind("nexus_", 0) == 0) fname = fname.substr(7);
 
-    std::string finalDir = env_.modulesDir + "/" + fname;
+    // 严格校验 ID
+    if (!ModuleLoader::isValidIdStatic(mr->id)) {
+        NX_LOG_E("DaemonCore", "manifest id invalid: %s", mr->id.c_str());
+        removeRecursive(tmpDir);
+        return {unexpect, Err::InvalidArg};
+    }
+
+    std::string finalDir = env_.modulesDir + "/" + mr->id;
     mkdirRecursive(env_.modulesDir, 0755);
-    // 如果已存在，先删除
-    execCommand("rm -rf '" + finalDir + "'", 10);
+
+    // 如果已存在，先递归删除（用 C API，不走 shell）
+    if (probeDir(finalDir)) {
+        NX_LOG_I("DaemonCore", "module %s already exists, removing old version", mr->id.c_str());
+        if (!removeRecursive(finalDir)) {
+            NX_LOG_W("DaemonCore", "remove old module dir failed; continue anyway");
+        }
+    }
+
     if (::rename(tmpDir.c_str(), finalDir.c_str()) < 0) {
         NX_LOG_E("DaemonCore", "rename %s -> %s failed: %s",
                  tmpDir.c_str(), finalDir.c_str(), ::strerror(errno));
-        return std::unexpected(Err::IoError);
+        removeRecursive(tmpDir);
+        return {unexpect, Err::IoError};
     }
 
     InstallResult result;
-    result.id = fname;
+    result.id = mr->id;
     result.needReboot = true;
-    NX_LOG_I("DaemonCore", "module %s installed (need reboot)", fname.c_str());
+    NX_LOG_I("DaemonCore", "module %s v%s installed (need reboot)",
+             mr->id.c_str(), mr->version.c_str());
     return result;
 }
 
 bool DaemonCore::uninstallModule(const std::string& id) {
+    // Phase 1.3 修复：原用 execCommand("rm -rf '" + modulePath + "'") 存在 shell 注入。
+    // 改用 removeRecursive（C API 递归 unlink），不依赖 shell。
+    //
+    // 同时校验 id 通过 isValidIdStatic，防止构造恶意路径。
+
+    if (!ModuleLoader::isValidIdStatic(id)) {
+        NX_LOG_E("DaemonCore", "reject uninstall: invalid module id: %s", id.c_str());
+        return false;
+    }
+
     std::string modulePath = env_.modulesDir + "/" + id;
     if (!probeDir(modulePath)) return false;
 
-    // 执行 uninstall.sh
+    // 执行 uninstall.sh（用 scriptExecutor 走 fork+execve，不走 shell -c）
     std::string uninstallScript = modulePath + "/uninstall.sh";
     if (probeFile(uninstallScript)) {
         ScriptExecutor::ExecOptions opts;
@@ -287,8 +359,11 @@ bool DaemonCore::uninstallModule(const std::string& id) {
         scriptExecutor_.execute(opts);
     }
 
-    // 删除目录
-    execCommand("rm -rf '" + modulePath + "'", 10);
+    // 递归删除目录（C API，无 shell 注入）
+    if (!removeRecursive(modulePath)) {
+        NX_LOG_W("DaemonCore", "removeRecursive failed for %s; some files may remain",
+                 modulePath.c_str());
+    }
     bus_.publishModuleUnloaded(id);
     NX_LOG_I("DaemonCore", "module %s uninstalled", id.c_str());
     return true;
@@ -310,57 +385,75 @@ void DaemonCore::enterSafeMode(uint32_t timeoutSec) {
 
 bool DaemonCore::reboot(RebootMode mode) {
     NX_LOG_W("DaemonCore", "reboot mode=%d", (int)mode);
+    // Phase 1.7 修复：
+    // - 原 ::reboot(LINUX_REBOOT_CMD_RESTART2, "recovery") 是 2 参数调用，
+    //   但 reboot(2) 的 4 参数签名是 reboot(magic1, magic2, cmd, arg)。
+    //   Android NDK <sys/reboot.h> 同时提供 1 参与 4 参版本，2 参是错误的。
+    // - 原代码 return true 在失败时也返回 true（::reboot 失败返回 -1）
+    // 改为：用 __reboot 4 参数版本 + 检查返回值
+    ::sync();
+    int r = -1;
     switch (mode) {
         case RebootMode::Normal:
-            ::sync();
-            ::reboot(LINUX_REBOOT_CMD_RESTART);
-            return true;
+            r = ::reboot(LINUX_REBOOT_CMD_RESTART);
+            break;
         case RebootMode::Recovery:
-            ::sync();
-            ::reboot(LINUX_REBOOT_CMD_RESTART2, "recovery");
-            return true;
+            // __reboot 是 Android bionic 提供的 4 参数版本
+            r = syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+                       LINUX_REBOOT_CMD_RESTART2, "recovery");
+            break;
         case RebootMode::Bootloader:
-            ::sync();
-            ::reboot(LINUX_REBOOT_CMD_RESTART2, "bootloader");
-            return true;
+            r = syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+                       LINUX_REBOOT_CMD_RESTART2, "bootloader");
+            break;
         case RebootMode::Download:
-            ::sync();
-            ::reboot(LINUX_REBOOT_CMD_RESTART2, "download");
-            return true;
+            r = syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+                       LINUX_REBOOT_CMD_RESTART2, "download");
+            break;
         case RebootMode::Userspace:
             // 整改 #13：USERSPACE 需要 sys.powerctl 写权限，由 SELinuxManager 已注入
             // 详见 spec-01 §13.2
 #ifdef __ANDROID__
             ::property_set("sys.powerctl", "userspace");
-#endif
-            // 备选：fallback 到 NORMAL
             NX_LOG_W("DaemonCore", "userspace reboot requested; fallback may apply");
             return true;
+#else
+            // host 测试时不实际 reboot
+            return true;
+#endif
     }
-    return false;
+    if (r < 0) {
+        NX_LOG_E("DaemonCore", "reboot failed: %s", ::strerror(errno));
+        return false;
+    }
+    return true;   // 实际 reboot 成功不会到这
 }
 
 bool DaemonCore::uninstallFramework() {
     NX_LOG_W("DaemonCore", "uninstall framework requested");
     // 1. umount 所有
     if (fs_) fs_->unmountAll();
-    // 2. 删除 /data/adb/nexuscore（保留 config 备份）
-    execCommand("rm -rf /data/adb/nexuscore/modules /data/adb/nexuscore/overlay "
-                "/data/adb/nexuscore/bin /data/adb/nexuscore/logs", 30);
+    // 2. 删除 /data/adb/nexuscore 子目录（用 C API，不走 shell）
+    // Phase 1.3 修复：原用 execCommand("rm -rf ...") 存在路径硬编码虽无注入但有可靠性问题
+    removeRecursive("/data/adb/nexuscore/modules");
+    removeRecursive("/data/adb/nexuscore/overlay");
+    removeRecursive("/data/adb/nexuscore/bin");
+    removeRecursive("/data/adb/nexuscore/logs");
     // 3. 标记下次启动自杀（让 init service 不再启动）
     writeFile("/data/adb/nexuscore/.uninstall_pending", "1", 0644);
     return true;
 }
 
 bool DaemonCore::clearLogs(int target) {
+    // Phase 1.3 修复：原用 execCommand("rm -f ...") 改用 ::unlink（C API）
     std::string path = "/data/adb/nexuscore/logs";
     if (target == 0 || target == 1) {
-        // daemon 日志
-        execCommand("rm -f " + path + "/nexusd.log " + path + "/modules.log", 5);
+        ::unlink((path + "/nexusd.log").c_str());
+        ::unlink((path + "/modules.log").c_str());
     }
     if (target == 0 || target == 2) {
-        // su 日志
-        execCommand("rm -f " + path + "/su.log " + path + "/su_policy.json", 5);
+        ::unlink((path + "/su.log").c_str());
+        ::unlink((path + "/su_policy.json").c_str());
     }
     return true;
 }

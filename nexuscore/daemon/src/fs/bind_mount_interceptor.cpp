@@ -18,9 +18,11 @@ Result<void> BindMountInterceptor::mountOverlay(const MountTarget& t) {
     std::string stock = env_.overlayBase + "/stock/" + hashPath(t.target);
     if (!probeFile(stock)) {
         mkdirRecursive(env_.overlayBase + "/stock", 0755);
-        if (!copyFile(t.target, stock)) {
-            NX_LOG_W("BindMount", "backup stock failed for %s (errno=%d); continue",
-                     t.target.c_str(), errno);
+        // Phase 1.7 修复：copyFile 内部会调用多个 syscall 改变 errno，
+        // 不能在 copyFile 失败后再读 errno。改为不读 errno，只记录 bool。
+        bool backupOk = copyFile(t.target, stock);
+        if (!backupOk) {
+            NX_LOG_W("BindMount", "backup stock failed for %s; continue", t.target.c_str());
             // 备份失败不阻断 bind mount，umount 后 target 自然恢复
         }
     }
@@ -29,11 +31,15 @@ Result<void> BindMountInterceptor::mountOverlay(const MountTarget& t) {
                 MS_BIND, nullptr) < 0) {
         NX_LOG_W("BindMount", "bind failed for %s: %s",
                  t.target.c_str(), ::strerror(errno));
-        return std::unexpected(Err::MountFailed);
+        return {unexpect, Err::MountFailed};
     }
-    // 只读重挂
-    ::mount(t.source.c_str(), t.target.c_str(), nullptr,
-            MS_BIND | MS_REMOUNT | MS_RDONLY, nullptr);
+    // Phase 1.7 修复：原代码只读重挂未检查返回值，失败会留 read-write mount
+    if (::mount(t.source.c_str(), t.target.c_str(), nullptr,
+                MS_BIND | MS_REMOUNT | MS_RDONLY, nullptr) < 0) {
+        NX_LOG_W("BindMount", "remount RO failed for %s: %s (mount stays RW)",
+                 t.target.c_str(), ::strerror(errno));
+        // 不致命，但记录（生产应拒绝继续）
+    }
     mounted_.push_back(t.target);
     NX_LOG_I("BindMount", "bind-mounted %s -> %s (module=%s)",
              t.source.c_str(), t.target.c_str(), t.moduleId.c_str());

@@ -36,7 +36,7 @@ Result<RootEnvironment> RootEnvironmentDetector::detect() {
     // 实际严格语义：provider == None 应进只读模式（main.cpp 处理）
     if (env.provider == RootProvider::None) {
         NX_LOG_W("EnvDetector", "no root provider detected; daemon will run read-only");
-        return std::unexpected(Err::NotFound);
+        return {unexpect, Err::NotFound};
     }
 
     // provider 版本

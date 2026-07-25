@@ -44,15 +44,22 @@ public:
     // 列出模块的 system/ 文件，构造 MountTarget 列表
     std::vector<MountTarget> collectMountTargets(const LoadedModule& m);
 
-private:
-    const RootEnvironment& env_;
-    std::string modulesDir_;
+    // ============ Phase 1.3 修复：公开 API ============
+    // 原本 parseManifest / isValidId 是 private，导致 DaemonCore::installModule
+    // 无法复用，转而用 ZIP 文件名作为模块 ID，造成 shell 注入漏洞。
+    // 现在公开这些方法，installModule 可以正确解析 manifest 拿到合法 ID。
 
     // 解析单个 manifest.json
     Result<ModuleManifest> parseManifest(const std::string& path);
 
     // 校验 manifest id 正则 ^[a-z][a-z0-9_]{2,63}$
-    bool isValidId(const std::string& id);
+    // 静态版本：不需要实例化 ModuleLoader 即可调用
+    static bool isValidIdStatic(const std::string& id);
+    bool isValidId(const std::string& id) { return isValidIdStatic(id); }
+
+private:
+    const RootEnvironment& env_;
+    std::string modulesDir_;
 
     // 列出目录下所有 system/ 文件（相对 system/ 的路径）
     std::vector<std::string> listSystemFiles(const std::string& modulePath);
