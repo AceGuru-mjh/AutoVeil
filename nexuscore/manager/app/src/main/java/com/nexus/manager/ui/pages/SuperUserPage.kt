@@ -18,9 +18,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -29,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -70,14 +73,38 @@ fun SuperUserPage(
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
     var tab by remember { mutableStateOf(0) }
+    var query by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
 
     CollectMessages(viewModel.messages)
+
+    val filteredApps = remember(apps, query) {
+        if (query.isBlank()) apps
+        else apps.filter {
+            it.packageName.contains(query, ignoreCase = true) ||
+                "${it.uid}".contains(query)
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         GlassTopBar(
             title = "超级用户",
             subtitle = "Root 授权与日志",
             actions = {
+                // 仅应用 tab 显示搜索
+                if (tab == 0) {
+                    IconButton(onClick = {
+                        if (searchOpen) { searchOpen = false; query = "" }
+                        else searchOpen = true
+                    }) {
+                        Icon(
+                            if (searchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
+                            contentDescription = if (searchOpen) "关闭搜索" else "搜索",
+                            tint = if (searchOpen) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
                 IconButton(onClick = viewModel::refresh, enabled = !loading) {
                     if (loading) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -88,16 +115,30 @@ fun SuperUserPage(
             },
         )
 
+        if (searchOpen && tab == 0) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                placeholder = { Text("搜索包名 / UID…") },
+                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+            )
+        }
+
         PrimaryTabRow(
             selectedTabIndex = tab,
             containerColor = androidx.compose.ui.graphics.Color.Transparent,
         ) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("应用 (${apps.size})") })
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("应用 (${filteredApps.size})") })
             Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("日志 (${logs.size})") })
         }
 
         when (tab) {
-            0 -> AppsTab(apps = apps, onSetPolicy = viewModel::setPolicy)
+            0 -> AppsTab(apps = filteredApps, onSetPolicy = viewModel::setPolicy)
             1 -> LogsTab(logs = logs, onClear = viewModel::clearLogs)
         }
     }
