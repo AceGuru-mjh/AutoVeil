@@ -190,7 +190,7 @@ struct RootEnvironment {
     std::string overlayBase;      // /data/adb/nexuscore/overlay
     std::string modulesDir;       // /data/adb/nexuscore/modules
     std::string sepolicyPath;     // /sys/fs/selinux/policy 或 split 后的路径
-    bool sepolicyWritable = false;
+    bool sepolicyWritable = false; // ::access(path, W_OK) == 0（不是 probeFile 存在性检查）
     bool overlayFsAvailable = false;     // /proc/filesystems 含 overlay
     bool fuseAvailable = false;          // /proc/filesystems 含 fuse
     bool dynamicPartitions = false;      // /proc/mounts 含 /dev/block/dm-
@@ -284,8 +284,10 @@ Result<RootEnvironment> RootEnvironmentDetector::detect() {
     env.modulesDir    = "/data/adb/nexuscore/modules";
 
     // sepolicy 路径
+    // 整改：probeFile 只检测存在性，但 /sys/fs/selinux/policy 永远存在却默认不可写。
+    //       必须用 ::access(W_OK) 真实验证可写权限。
     env.sepolicyPath      = "/sys/fs/selinux/policy";
-    env.sepolicyWritable  = probeFile(env.sepolicyPath.c_str());
+    env.sepolicyWritable  = (::access(env.sepolicyPath.c_str(), W_OK) == 0);
 
     // 内核 FS 能力
     env.overlayFsAvailable = kernelSupports("overlay");
@@ -438,13 +440,17 @@ int main(int argc, char** argv) {
         return (int)r.error();
     }
 
-    auto env = RootEnvironmentDetector::detect();
-    if (!env) {
-        NX_LOG_ERR("main", "root env detect failed, abort mount stage");
-        // 进入只读模式（见 §5.1 降级）
+    auto envR = RootEnvironmentDetector::detect();
+    if (!envR) {
+        NX_LOG_ERR("main", "root env detect failed (err=%d), enter read-only mode",
+                   (int)envR.error());
+        // 整改 #7（原 bug）：原代码继续 `*env` 会 UB / 段错误。
+        // 正确做法：跳过 mount 阶段，进入只读模式（仅 IPC + 状态查询可用）。
+        return runReadOnlyMode();
     }
+    RootEnvironment env = std::move(*envR);
 
-    SELinuxManager se(*env);
+    SELinuxManager se(env);
     if (auto r = se.patchSelfDomain(); !r) {
         NX_LOG_WARN("main", "selinux patch failed (err=%d); continue in restricted mode",
                     (int)r.error());
@@ -454,8 +460,8 @@ int main(int argc, char** argv) {
     auto bus = std::make_shared<InMemoryEventBus>();
     auto isolator = std::make_shared<NamespaceIsolator>();
 
-    auto loader = std::make_shared<ModuleLoader>(*env, bus, isolator);
-    auto modulesR = loader->scanModules(env->modulesDir);
+    auto loader = std::make_shared<ModuleLoader>(env, bus, isolator);
+    auto modulesR = loader->scanModules(env.modulesDir);
     if (!modulesR) {
         NX_LOG_WARN("main", "scanModules failed: %d; skipping mount stage", (int)modulesR.error());
     }
@@ -596,25 +602,59 @@ Result<bool> OverlayFsInterceptor::detect(const RootEnvironment& env) {
     return false;
 }
 
+// 整改 #2（原 bug）：OverlayFS 的 lowerdir 只能是目录，t.target 是文件（如
+// /system/build.prop），原写法 `lowerdir=<file>:<file>` 在 mount(2) 时直接 EINVAL。
+//
+// 正确做法（参考 Magisk magic mount）：
+// 1) 构造一个目录树镜像目标父目录结构，把 stock 文件放进去
+//    例如对 /system/build.prop：
+//      /data/adb/nexuscore/overlay/<module>/system/build.prop  ← 模块版
+//      /data/adb/nexuscore/stock/<module>/system/build.prop    ← 原始 stock 备份
+// 2) lowerdir = <stock_dir>:<module_dir>
+// 3) mount target = /system（**目录**，而非 build.prop 文件）
+//    这样 build.prop 会被 overlay 出来的同名文件覆盖，其余文件保持 stock。
+//
+// 重要：对整个 /system 做 overlay 在 Android 13+ EROFS 上可能不可行（kernel
+// 不允许在 EROFS 之上挂 overlay），此时由 FsDetector 自动降级到 BindMount。
 Result<void> OverlayFsInterceptor::mountOverlay(const MountTarget& t) {
-    // target 例如 /system/build.prop
-    // 将原文件作为 lowerdir[0]，模块修改版作为 lowerdir[1]
-    // upperdir = /data/adb/nexuscore/overlay/<module>/<hash>/upper
-    // workdir  = .../work
-    std::string upper = env_.overlayBase + "/upper/" + hash(t.target);
-    std::string work  = env_.overlayBase + "/work/"  + hash(t.target);
+    // 解析父目录与文件名
+    auto slash = t.target.find_last_of('/');
+    if (slash == std::string::npos) return std::unexpected(Err::InvalidArg);
+    std::string parentDir = t.target.substr(0, slash);   // /system
+    std::string baseName  = t.target.substr(slash + 1);  // build.prop
+
+    // 在 /data/adb/nexuscore/overlay/<hash>/lower_stock/<parentDir>/<baseName>
+    // 在 /data/adb/nexuscore/overlay/<hash>/lower_mod/<parentDir>/<baseName>
+    std::string hashStr   = hash(t.target);
+    std::string stockRoot = env_.overlayBase + "/stock/" + hashStr;
+    std::string modRoot   = env_.overlayBase + "/mod/"   + hashStr;
+    std::string upper     = env_.overlayBase + "/upper/" + hashStr;
+    std::string work      = env_.overlayBase + "/work/"  + hashStr;
+
+    // 在 stockRoot 下镜像出 parentDir/baseName，并 copy（不是 link，跨 fs link 会 EXDEV）
+    std::string stockFile = stockRoot + parentDir + "/" + baseName;
+    if (!probeFile(stockFile)) {
+        if (!mkdirRecursive(stockRoot + parentDir)) return std::unexpected(Err::IoError);
+        if (!copyFile(t.target, stockFile))          return std::unexpected(Err::IoError);
+    }
+    // 在 modRoot 下镜像出 parentDir/baseName，文件来自 t.source（模块版本）
+    std::string modFile = modRoot + parentDir + "/" + baseName;
+    if (!mkdirRecursive(modRoot + parentDir)) return std::unexpected(Err::IoError);
+    if (!copyFile(t.source, modFile))          return std::unexpected(Err::IoError);
     ::mkdir(upper.c_str(), 0755);
     ::mkdir(work.c_str(),  0755);
 
-    std::string opts = "lowerdir=" + t.source + ":" + t.target
+    // lowerdir 顺序：右优先级高（mod 覆盖 stock）
+    std::string opts = "lowerdir=" + modRoot + ":" + stockRoot
                      + ",upperdir=" + upper
                      + ",workdir="  + work;
 
-    if (mount("overlay", t.target.c_str(), "overlay",
+    // mount target 是父目录（目录而非文件），符合 overlayfs 规范
+    if (mount("overlay", parentDir.c_str(), "overlay",
               MS_NODEV | MS_NOATIME, opts.c_str()) < 0) {
         return std::unexpected(Err::MountFailed);
     }
-    mounted_.push_back(t.target);
+    mounted_.push_back(parentDir);   // 记录的是目录，便于 unmountAll
     return {};
 }
 ```
@@ -654,22 +694,29 @@ Result<bool> BindMountInterceptor::detect(const RootEnvironment& env) {
     return true;   // 始终可用作为降级方案
 }
 
+// 整改 #3（原 bug）：原代码用 ::link() 做 stock 备份，但 link(2) 是硬链接，
+// 从 /system/build.prop（EROFS/squashfs）到 /data/adb/...（ext4/f2fs）跨 fs
+// 会返回 EXDEV，永远失败。
+//
+// 正确做法：用 copy（read + write）做备份。
 Result<void> BindMountInterceptor::mountOverlay(const MountTarget& t) {
-    // 1) 备份原文件到 /data/adb/nexuscore/stock/<hash>
-    // 2) bind mount: mount(t.source, t.target, NULL, MS_BIND | MS_REC, NULL)
-    // 3) 重新 mount 一次 MS_BIND | MS_REMOUNT | MS_RDONLY 保证只读语义
+    // 1) 备份原文件到 /data/adb/nexuscore/stock/<hash>（用 copy，不是 link）
     std::string stock = env_.overlayBase + "/stock/" + hash(t.target);
     if (!probeFile(stock)) {
-        if (::link(t.target.c_str(), stock.c_str()) < 0
-            && errno != EEXIST) {
-            return std::unexpected(Err::IoError);
+        if (!copyFile(t.target, stock)) {
+            NX_LOG_WARN("BindMount", "backup stock failed for %s (errno=%d); continue",
+                        t.target.c_str(), errno);
+            // 备份失败不阻断 bind mount，umount 后 target 自然恢复
         }
     }
+    // 2) bind mount: mount(t.source, t.target, NULL, MS_BIND, NULL)
+    //    注意：MS_REC 在单文件 bind 上无意义（仅目录递归 bind 才需要），
+    //    原代码 MS_BIND | MS_REC 会触发 EINVAL on file targets。
     if (::mount(t.source.c_str(), t.target.c_str(), nullptr,
-                MS_BIND | MS_REC, nullptr) < 0) {
+                MS_BIND, nullptr) < 0) {
         return std::unexpected(Err::MountFailed);
     }
-    // 保持只读，避免被后续脚本误写
+    // 3) 重新 mount 一次 MS_BIND | MS_REMOUNT | MS_RDONLY 保证只读语义
     ::mount(t.source.c_str(), t.target.c_str(), nullptr,
             MS_BIND | MS_REMOUNT | MS_RDONLY, nullptr);
     mounted_.push_back(t.target);
@@ -1306,9 +1353,17 @@ Result<void> CredentialCheck::authorize(const PeerCredential& peer) {
         return std::unexpected(Err::Unauthorized);
 
     // 3) SELinux 域必须是 untrusted_app / platform_app / system_app
-    if (peer.selinuxContext.find("u:r:untrusted_app:s0") == std::string::npos &&
-        peer.selinuxContext.find("u:r:platform_app:s0")  == std::string::npos &&
-        peer.selinuxContext.find("u:r:system_app:s0")    == std::string::npos)
+    //    整改 #4（原 bug）：Android 10+ 实际 context 是
+    //      u:r:untrusted_app_30:s0:c512,c768,...
+    //    带 _NN 后缀和 categories，原写法 find("u:r:untrusted_app:s0")
+    //    匹配不到 untrusted_app_30:s0:c...，所有合法 Manager 都被拒。
+    //    正确写法：去掉 :s0 后缀，用前缀匹配。
+    auto inDomain = [](const std::string& ctx, const std::string& prefix) {
+        return ctx.rfind(prefix, 0) == 0;   // 前缀匹配
+    };
+    if (!inDomain(peer.selinuxContext, "u:r:untrusted_app") &&
+        !inDomain(peer.selinuxContext, "u:r:platform_app")  &&
+        !inDomain(peer.selinuxContext, "u:r:system_app"))
         return std::unexpected(Err::Unauthorized);
 
     // 4) APK 签名指纹校验（防伪 Manager）
@@ -1448,8 +1503,27 @@ Result<void> IpcServer::start(std::string_view socketPath) {
     ::unlink(socketPath.data());  // 清理旧 sock
     if (::bind(listenFd_, (struct sockaddr*)&addr, sizeof(addr)) < 0)
         return std::unexpected(Err::IoError);
-    ::chmod(socketPath.data(), 0660);  // 仅同组可连
-    ::chown(socketPath.data(), 0, 1000); // root:system
+
+    // 整改 #5（原 bug - catch-22）：原写法 chmod 0660 + chown root:system，
+    //   但 Manager 是 untrusted_app（UID 10xxx），不在 gid=1000 (system) 组，
+    //   connect() 直接被 EACCES 拒绝，根本走不到 SO_PEERCRED 校验。
+    //
+    // 解决方案（动态 chown）：Daemon 启动时读 /data/adb/nexuscore/manager_uid，
+    //   这个文件由 Magisk/KSU 模块在 post-fs-data 阶段写入（通过 pm 路径查找
+    //   com.nexus.manager 的 UID）。chown socket 给 root:manager_uid，chmod 0660。
+    //   这样只有 Manager 自己能连，安全性等价于 SO_PEERCRED，且无需 platform 签名。
+    //
+    // 兜底：若 manager_uid 文件不存在（首次启动 / 未安装 Manager），
+    //   退化为 0666 + 仅依赖 SO_PEERCRED。任何能连上的进程仍要过凭证校验。
+    auto managerUid = readManagerUidFromFile();
+    if (managerUid) {
+        ::chmod(socketPath.data(), 0660);
+        ::chown(socketPath.data(), 0, *managerUid);  // root:manager_uid
+        NX_LOG_INFO("IPC", "socket chown root:%d (manager-specific)", *managerUid);
+    } else {
+        ::chmod(socketPath.data(), 0666);  // 兜底，依赖 SO_PEERCRED 强校验
+        NX_LOG_WARN("IPC", "manager_uid file missing; using 0666 + SO_PEERCRED");
+    }
     if (::listen(listenFd_, 8) < 0) return std::unexpected(Err::IoError);
 
     running_ = true;
@@ -1631,7 +1705,7 @@ adb reboot
 |---|---|---|---|
 | 1 | Daemon 启动 | `adb shell ps -A \| grep nexusd` | 进程存在，ppid=1 |
 | 2 | PID 文件 | `adb shell cat /dev/nexusd.pid` | 输出 PID |
-| 3 | Socket 存在 | `adb shell ls -l /dev/socket/nexusd.sock` | 0660 root:system |
+| 3 | Socket 存在 | `adb shell ls -l /dev/socket/nexusd.sock` | 0660 root:<manager_uid> 或兜底 0666 root:root |
 | 4 | SELinux 仍 enforcing | `adb shell getenforce` | `Enforcing` |
 | 5 | nexus_daemon 域已注入 | `adb shell ps -Z \| grep nexusd` | `u:r:nexus_daemon:s0` |
 | 6 | IPC 可连（带凭证） | 用 Manager 测试 | 返回 status |
@@ -1708,3 +1782,72 @@ Result<void> BootCounter::tick() {
 - 本 Spec 的 IPC schema (`nexus.proto`) 被 [Spec 02 — Manager](./spec-02-manager.md) 直接复用。
 - 本 Spec 的 `manifest.json` 解析逻辑依赖 [Spec 03 — Module SDK](./spec-03-module-sdk.md) 定义的 JSON Schema。
 - 模块脚本运行时环境变量（`NEXUS_MODULE_PATH` 等）见 Spec 03 §3。
+
+---
+
+## 13. 补充章节：RebootRequest 实现路径
+
+### 13.1 各 reboot 模式的实现机制
+
+`nexus.proto` 的 `RebootRequest.Mode` 在 daemon 端的实现：
+
+| Mode | 实现命令 | SELinux 要求 | 备注 |
+|---|---|---|---|
+| `NORMAL`   | `__reboot(LINUX_REBOOT_CMD_RESTART)` | CAP_SYS_BOOT + init 域 | 直接 syscall，最稳 |
+| `RECOVERY` | `__reboot(LINUX_REBOOT_CMD_RESTART2, "recovery")` | 同上 | 传递 bootloader 参数 |
+| `BOOTLOADER` | `__reboot(LINUX_REBOOT_CMD_RESTART2, "bootloader")` | 同上 | 同上 |
+| `DOWNLOAD` | `__reboot(LINUX_REBOOT_CMD_RESTART2, "download")` | 同上 | Samsung/部分 OEM |
+| `USERSPACE` | `setprop sys.powerctl=userspace` + 等 zygote 重启 | init 域 + sys.powerctl 写权限 | **见 13.2 注意** |
+
+### 13.2 USERSPACE 软重启的实现路径（重要）
+
+普通 root daemon **无法直接调用 `setprop sys.powerctl`** —— 该属性在 SELinux 策略中只允许 `init` 域写入。NexusCore 作为寄生在 Magisk/KSU/APatch 之上的用户态框架，**必须借助底层 root 帮忙注入 SELinux 策略**才能实现 USERSPACE 软重启：
+
+1. **依赖底层 root**：Daemon 启动期通过 `SELinuxManager::patchSelfDomain()` 调用底层 root 提供的策略注入工具（Magisk 的 `magiskpolicy`、KSU 的内置 hook、APatch 的 KPM），向 `nexus_daemon` 域添加：
+   ```
+   allow nexus_daemon init:property_service { set };
+   allow nexus_daemon kernel:property { set };
+   ```
+2. **降级策略**：若策略注入失败（底层 root 不支持或权限被拒），`USERSPACE` 模式回退为 `setprop sys.powerctl=reboot,userspace`（部分设备支持）或直接调用 `NORMAL` 模式重启，并在 IPC Response 中返回 warning。
+3. **替代实现**：如果 `sys.powerctl` 完全不可用，可以用 `stop zygote && start zygote`（需 init 域权限，效果等价但更暴力）。
+
+**协议契约**：Manager 调用 `RebootRequest.USERSPACE` 时应预期"可能 fallback 到 NORMAL"的情况，UI 上提示"软重启失败将改为正常重启"。
+
+---
+
+## 14. 补充章节：与底层 Root 的关系定位
+
+### 14.1 不是 Root 框架，是 Module Runtime
+
+NexusCore **不提供 root，不提供 su**。它的定位是：
+
+> **建立在 Magisk / KernelSU / APatch 之上的用户态模块运行时（userspace module runtime）**，
+> 提供声明式模块清单、capabilities 强制校验、独立 mount namespace 脚本沙盒、
+> 统一的 IPC 与 Manager UI，让模块开发者无需关心底层 root 实现。
+
+### 14.2 与底层 Root 的协作模型
+
+```
+┌─────────────────────────────────────────┐
+│  Magisk / KSU / APatch (底层 root)       │
+│  - 提供 root 进程能力（CAP_SYS_ADMIN 等）│
+│  - 提供 SELinux 策略注入工具              │
+│  - 启动 nexusd（作为 Magisk 模块的 daemon）│
+└─────────────────────────────────────────┘
+                  ▼ fork & exec
+┌─────────────────────────────────────────┐
+│  nexusd (NexusCore Daemon, 用户态)        │
+│  - 接管模块挂载、脚本执行、SU 策略持久化   │
+│  - 所有 root 能力通过底层 root 授权       │
+│  - 不与底层 root 的 su 冲突（共存模式）   │
+└─────────────────────────────────────────┘
+```
+
+### 14.3 SU 共存策略（重要）
+
+底层 Magisk/KSU/APatch 自带 su 授权系统。NexusCore 的 `SuperUserPage` / `SuRequestDialog` **不替代**底层 su，而是：
+
+- **代理模式**：Daemon 在 init.rc 注册 `su` 二进制路径优先级低于底层 root 的 su。应用调用 `su` 时，底层 root 处理；NexusCore 的 SuRequest IPC 仅作为**辅助通知通道**，让 Manager UI 显示实时请求（订阅底层 root 的事件，或被底层 root 通过 magisk-policy hook 通知）。
+- **冲突避免**：NexusCore **绝不**安装自己的 `su` 二进制。`SetSuPolicy` RPC 仅写入 Manager 本地的策略文件，由用户在底层 root 的 Manager 里手动 mirror 配置（或后续版本通过底层 root 提供的 API 自动同步）。
+
+**当前 MVP 状态**：SuperUser UI 已实现但 IPC 端点未实现（依赖 daemon 完成后才能与底层 root 联动）。在 daemon 完成前，SuperUser 页面将显示"等待 Daemon 连接"占位。

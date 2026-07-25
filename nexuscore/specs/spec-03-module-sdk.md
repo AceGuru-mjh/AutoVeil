@@ -243,17 +243,50 @@ Daemon 在解析时使用 C++ 内嵌的轻量校验（`nlohmann::json` + 手写�
 
 脚本 `stdout` / `stderr` 被 Daemon 重定向到 `/data/adb/nexuscore/logs/<id>.log`，同时通过 `EVENT_SCRIPT_DONE` 事件广播给订阅者（Manager Logs 页可看到）。
 
+### 5.5 Magisk 兼容 shim 列表
+
+为降低 Magisk 模块作者迁移成本，Daemon 在执行 `customize.sh` 时注入以下 Magisk 风格的函数与变量（不需要模块自己 source）：
+
+| shim 函数/变量 | 行为 | 备注 |
+|---|---|---|
+| `ui_print <msg>` | 输出到 stdout，被 Daemon 转发到 Manager 安装进度 UI | 等价 Magisk |
+| `set_perm <file> <owner> <group> <perm>` | `chown owner:group file && chmod perm file` | 等价 Magisk |
+| `set_perm_recursive <dir> <owner> <group> <dir_perm> <file_perm>` | 递归 chown + chmod | 等价 Magisk |
+| `abort <msg>` | 输出错误并 `exit 1`（**修订：原 Spec 漏定义，导致脚本继续执行**） | 等价 Magisk |
+| `SKIPUNZIP=0/1` | 控制 Daemon 是否自动解压 ZIP | 仅 customize.sh 中有效 |
+| `MODPATH` | 等价 `$NEXUS_MODULE_PATH`（Magisk 习惯别名） | 注入 |
+| `TMPDIR` | 等价 `$NEXUS_TMPDIR` | 注入 |
+| `ZIPFILE` | 安装时 ZIP 的本地路径 | 注入 |
+
+**未 shim 的 Magisk 特性**（明确不支持）：
+- Magisk `.so` 注入（`zygisk` 模块）
+- `update-binary` 自定义安装器
+- `system.prop` 自动合并（NexusCore 用 `system/build.prop` 显式覆盖）
+- `sepolicy.sh` 自动执行（NexusCore 用 capabilities 声明 `MODIFY_SYSTEM_PROPS`）
+
+**未声明 `EXECUTE_SHELL` 的模块提供任何 `.sh` 文件**：Daemon 跳过执行并记录 `CAPABILITY_DENIED`，安装继续但不执行脚本。
+
 ---
 
 ## 6. NexusProp Editor 示例模块
 
 ### 6.1 功能说明
 
-- **目标**：允许用户修改 `build.prop` 中的 `ro.debuggable` 和 `ro.secure` 属性
-- **实现方式**（按 Prompt 1 要求）：
-  - 不在 `system/` 直接放文件，而是通过 `customize.sh` 在安装时读取真实 `/system/build.prop`，修改指定属性，生成新文件放入模块的 `system/` 树
-  - `service.sh` 在开机后通过文件写入记录修改日志
-- **教学价值**：完整覆盖 manifest、capabilities、customize、service 四个核心场景
+- **目标**：演示通过 NexusCore 模块修改系统文件。**修订（原 Spec 在 Android 14+ 上不可靠）**：原 Spec 选 `build.prop` 中的 `ro.debuggable` / `ro.secure` 作为目标，但 Android 12+ 上：
+  - `/system/build.prop` 经常只剩占位，真实属性分散到 `/system/etc/prop.default`、`/vendor/build.prop`、`/system/product/build.prop` 等
+  - `ro.debuggable` 由 `__system_property_area__` 在 init 早期从多个来源合并，bind mount 单个 build.prop **不一定**改变 `getprop` 的输出
+  - Spec 6.5 自己也承认 EROFS 上目标不存在会跳过
+
+  **修订方案**：示例模块改为新增 `/system/etc/hosts`（覆盖系统 hosts 文件），这个目标：
+  - 在所有 Android 版本上路径稳定存在
+  - bind mount 行为可预测（不需要 init 早期合并）
+  - 教学价值相同（演示 capabilities + customize + service + verify 全流程）
+  - 用户可实际验证（ping 一个域名看是否被劫持）
+
+- **原 build.prop 模块保留为 `nexus_prop_editor`**，但 README 中明确"Android 14+ 上可能不生效，仅作为 capabilities 演示"，并在 verify.sh 中检测目标 build.prop 是否真实存在。
+- **新增 `nexus_hosts_editor`** 作为推荐使用的教学模块（见 §6.10）。
+
+- **教学价值**：完整覆盖 manifest、capabilities、customize、service、verify 五个核心场景
 
 ### 6.2 文件清单
 
@@ -579,7 +612,7 @@ unzip -l "$OUT"
 |---|---|
 | `setprop ro.xxx` 报 Read-only | `ro.*` 不能 setprop，必须通过 `system/build.prop` 覆盖 |
 | 脚本在 `post-fs-data` 阶段访问网络 | 此阶段网络未就绪，放到 `service.sh` |
-| `service.sh` 修改的文件重启后消失 | `service.sh` 在独立 Mount NS，写入会随进程退出丢失。持久化数据写到 `/data/adb/nexuscore/<id>/` |
+| `service.sh` 修改的文件重启后消失 | **修订（原 Spec 错误）**：Mount Namespace 只隔离 mount/unmount 操作，**不**隔离对已挂载 fs（如 /data）的写操作。`service.sh` 写入 `/data/adb/nexuscore/<id>/runtime.log` 会正常持久化。**真正会丢失的是**：service.sh 在 NS 内 `mount tmpfs /tmp` 之类的临时挂载。所以原 Spec 的"写入会随进程退出丢失"是误导。正确的写法约束：仅 mount 操作会随 NS 销毁被回收；普通文件读写完全正常。 |
 | 多个模块覆盖同一文件冲突 | 用 `priority` 调整顺序；Phase 3 后用事件总线 |
 | `customize.sh` 里 `$MODPATH` 为空 | 必须由 Daemon 调用，不要手动执行 |
 

@@ -17,16 +17,25 @@
 
 ### 1.1 目标
 1. 实现 NexusManager 与 NexusDaemon 的稳定 IPC 通信，具备**断线重连**与**连接池**。
-2. 提供 3 个核心 Compose 页面：Dashboard、Modules、Logs。
+2. 提供 **6 个** Compose 页面（修订：原 Spec 写 3 个，实际已扩展）：
+   - **Dashboard** —— 系统状态总览（root / selinux / daemon / 模块数 / 安全模式 / 运行时长）
+   - **Modules** —— 已安装模块列表 + 安装/启用/禁用/卸载
+   - **ModuleDetail** —— 单模块详情 + 操作
+   - **SuperUser** —— 已授权 root 应用列表 + Su 实时请求对话框（**见 1.4 修订说明**）
+   - **Logs** —— Daemon 实时日志流 + 暂停/清除/导出
+   - **Settings** —— 主题/动态颜色/生物认证/更新通道/日志级别/卸载框架
 3. 使用 MVVM + StateFlow，所有 IPC 调用走 `Dispatchers.IO`。
 4. 支持本地 ZIP 模块安装（通过 IPC 把路径传给 Daemon）。
-5. 实时流式订阅 Daemon 日志。
+5. 实时流式订阅 Daemon 日志与 SuRequest 事件。
+6. Navigation Compose 多页面路由 + 底部毛玻璃导航栏。
+7. DataStore Preferences 持久化用户设置。
+8. BiometricPrompt 生物认证（**MVP 占位，见 §11**）。
 
 ### 1.2 非目标（MVP 不做）
 - 在线模块仓库浏览（仅保留入口按钮，点击后提示"敬请期待"）。
-- 模块自升级、自动检查更新。
+- ~~模块自升级、自动检查更新。~~ **修订**：proto 中保留 `has_update` / `update_url` 字段供未来使用，但 MVP 不实现检查逻辑。
 - 多 Daemon 实例管理。
-- Root 授权管理 UI（依赖 Magisk/KSU/APatch 自己的 Manager）。
+- ~~Root 授权管理 UI（依赖 Magisk/KSU/APatch 自己的 Manager）。~~ **修订**：见 §1.4。
 
 ### 1.3 评审整改落点
 | 评审问题 | 本 Spec 落点 |
@@ -34,6 +43,15 @@
 | IPC 权限校验薄弱 | Manager 侧配合：启动握手时主动报告自身签名指纹（Daemon 端做权威校验，见 Spec 01 §10.2） |
 | 断线重连 | §3.3 `ReconnectStrategy`，指数退避 + 系统事件触发 |
 | UI 线程阻塞 | 所有 IPC 走 `Dispatchers.IO`，ViewModel 只暴露 `StateFlow` |
+
+### 1.4 SU 共存策略（重要修订）
+
+原 Spec 写"Root 授权管理 UI 依赖底层 root 自己的 Manager"，但实际实现已新增 SuperUser 页面与 SuRequest 弹窗。**这是有意的产品决策**，详见 [Spec 01 §14.3](./spec-01-daemon.md#143-su-共存策略重要)：
+
+- **不替代底层 root 的 su 二进制**：NexusCore 绝不安装自己的 su，应用调用 `su` 仍由底层 Magisk/KSU/APatch 处理。
+- **作为辅助 UI 与事件通道**：SuperUser 页面订阅底层 root 的事件流（通过 daemon 中转），让用户在 NexusCore Manager 内也能看到实时 su 请求、历史日志、应用授权列表，**不必切换到 Magisk/KSU Manager**。
+- **本地策略 mirror**：用户在 NexusCore Manager 内修改的策略会写入本地数据库，并提示用户在底层 root Manager 里 mirror 同步（避免双 Manager 不一致）。
+- **MVP 状态**：UI 已完成，IPC 端点等 daemon 实现后启用。daemon 未就绪时，SuperUser 页面显示"等待 Daemon 连接"占位。
 
 ---
 
@@ -1362,3 +1380,92 @@ class NexusApp : Application() {
 
 - IPC schema 完全依赖 [Spec 01 §10.3](./spec-01-daemon.md#10-ipc-server-与凭证校验)。
 - 模块卡片显示的 `capabilities` 字段语义见 [Spec 03 §2](./spec-03-module-sdk.md)。
+
+---
+
+## 12. 补充章节：实际实现与原 Spec 的差异
+
+### 12.1 已扩展的目录结构
+
+实际实现的目录比 §2 描述的更完整，新增：
+
+```
+manager/app/src/main/java/com/nexus/manager/
+├── data/
+│   ├── bridge/FileBridge.kt        # SAF URI ↔ 临时文件桥接
+│   ├── repo/NexusRepository.kt     # Repository 模式封装 IPC
+│   ├── settings/SettingsStore.kt   # DataStore Preferences
+│   └── model/UiModels.kt           # UI 侧数据模型
+├── viewmodel/
+│   ├── DashboardViewModel.kt
+│   ├── ModulesViewModel.kt
+│   ├── ModuleDetailViewModel.kt    # 新增：模块详情
+│   ├── SuperUserViewModel.kt       # 新增：SU 应用列表
+│   ├── SuRequestViewModel.kt       # 新增：实时 SU 请求队列
+│   ├── LogsViewModel.kt
+│   ├── SettingsViewModel.kt        # 新增：设置页
+│   └── NexusViewModelFactory.kt    # 统一工厂
+├── ui/
+│   ├── NexusRoot.kt                # 应用根 Composable + NavHost
+│   ├── nav/Routes.kt               # 路由常量
+│   ├── theme/{Color,Theme,Shape,Type}.kt
+│   ├── components/                  # Glass* 系列 + 通用组件
+│   │   ├── GlassSurface.kt
+│   │   ├── GlassTopBar.kt
+│   │   ├── GlassNavBar.kt
+│   │   ├── NexusBackground.kt
+│   │   ├── BiometricGate.kt        # 占位（见 §12.3）
+│   │   ├── SuRequestDialog.kt      # 全局 SU 请求对话框
+│   │   ├── LocalSnackbar.kt        # 全局 Snackbar 控制器
+│   │   └── CommonComponents.kt     # StatusChip/InfoRow/MetricCard 等
+│   └── pages/
+│       ├── DashboardPage.kt
+│       ├── ModulesPage.kt
+│       ├── ModuleDetailPage.kt
+│       ├── SuperUserPage.kt
+│       ├── LogsPage.kt
+│       └── SettingsPage.kt
+```
+
+### 12.2 实际 proto 已扩展的 RPC
+
+`nexus.proto` 实际包含的 Request 比原 Spec 多：
+
+| RPC | 用途 | 状态 |
+|---|---|---|
+| `ListSuAppsRequest` / `SetSuPolicyRequest` / `ListSuLogsRequest` | SU 应用管理与日志 | ✅ Manager 端已实现 |
+| `RebootRequest` (NORMAL/USERSPACE/RECOVERY/BOOTLOADER/DOWNLOAD) | 重启系统（5 模式） | ✅ Manager 端已实现 |
+| `UninstallFrameworkRequest` | 卸载整个 NexusCore 框架 | ✅ Manager 端已实现 |
+| `ClearLogsRequest` | 清除日志（DAEMON/SU/ALL） | ✅ Manager 端已实现 |
+| `EnterSafeModeRequest` | 进入安全模式 | ✅ Manager 端已实现 |
+| `RestartDaemonRequest` | 重启 Daemon | ✅ Manager 端已实现 |
+| `ModuleInfo.has_update` / `update_url` | 模块更新提示 | ⚠️ 字段保留，MVP 不实现检查逻辑 |
+
+### 12.3 BiometricGate 占位说明
+
+`ui/components/BiometricGate.kt` 当前是**占位实现**：
+
+- `MainActivity` 是 `ComponentActivity`，无法挂 `BiometricPrompt` 的 `Fragment`。
+- 设置页开启"生物认证"后，**实际效果是直接通过认证**——这比关闭还危险（用户以为有保护实际没有）。
+- 设置页 UI 已诚实标注"（占位）"，但功能存在本身是误导。
+
+**修复计划**（Phase 2）：
+1. 把 `MainActivity` 改成 `FragmentActivity`。
+2. 实现真正的 `BiometricPrompt` 调用，处理 `onAuthenticationSucceeded/Failed/Error` 回调。
+3. 在敏感操作（卸载框架、进入安全模式、修改 SU 策略）前调用 `BiometricGate`。
+4. 在此之前，建议在 `SettingsPage` 把"生物认证"开关禁用并加 beta 标签。
+
+### 12.4 SuRequestDialog 前后台限制
+
+当前 `SuRequestDialog` 挂载在 `NexusRoot` Composable 里，App 后台/被杀时所有 su 请求被静默排队，请求方一直挂起。
+
+**修复计划**（Phase 2）：
+1. 把 `SuRequestActivity` 实现为真正的独立 exported Activity。
+2. Daemon 收到 su 请求时，通过 `am start --user 0 -n com.nexus.manager/.SuRequestActivity --es ...` 唤起 Manager。
+3. Activity 处理完 Intent 后调用 `setSuPolicy` 并 finish。
+
+### 12.5 FileBridge 主线程 IO 风险
+
+`FileBridge.copyUriToTemp` 当前在 `ModulesPage` 的 `zipPicker` 回调中**直接同步调用**，ZIP 文件可达 256 MiB，存在严重 ANR 风险。
+
+**修复计划**（已在本 PR 修复）：将 `copyUriToTemp` 改为 suspend 函数，UI 在协程中调用并显示进度。
