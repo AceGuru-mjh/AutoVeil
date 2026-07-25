@@ -1,0 +1,110 @@
+# NexusCore Zygisk-equivalent (NexusHook) - Rust 编译 CI
+#
+# 编译 NexusHook Rust 组件，验证创新 zygote 注入器代码可构建。
+
+name: Build NexusHook (Rust)
+
+on:
+  push:
+    branches: [main, fix/comprehensive-overhaul, 'feat/**']
+    paths:
+      - 'nexuscore/nexushook/**'
+      - '.github/workflows/nexushook.yml'
+  pull_request:
+    paths:
+      - 'nexuscore/nexushook/**'
+      - '.github/workflows/nexushook.yml'
+
+jobs:
+  host-check:
+    name: cargo check + clippy + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            nexuscore/nexushook/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('nexuscore/nexushook/**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: cargo fmt check
+        working-directory: nexuscore/nexushook
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        working-directory: nexuscore/nexushook
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: cargo test
+        working-directory: nexuscore/nexushook
+        run: cargo test --all-features --no-fail-fast
+
+      - name: cargo doc
+        working-directory: nexuscore/nexushook
+        run: cargo doc --no-deps --all-features
+
+  android-cross-compile:
+    name: Android arm64 cross-compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: host-check
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Set up NDK
+        uses: nttld/setup-ndk@v1
+        id: setup_ndk
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Configure cargo for Android
+        working-directory: nexuscore/nexushook
+        env:
+          NDK: ${{ steps.setup_ndk.outputs.ndk-path }}
+        run: |
+          mkdir -p ~/.cargo
+          cat > ~/.cargo/config.toml <<EOF
+          [target.aarch64-linux-android]
+          linker = "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang"
+          ar = "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          EOF
+
+      - name: Build for Android arm64
+        working-directory: nexuscore/nexushook
+        run: cargo build --release --target aarch64-linux-android
+
+      - name: Verify binary
+        working-directory: nexuscore/nexushook
+        run: |
+          file target/aarch64-linux-android/release/nexushook
+          ls -lh target/aarch64-linux-android/release/nexushook
+
+      - name: Upload nexushook binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexushook-arm64
+          path: nexuscore/nexushook/target/aarch64-linux-android/release/nexushook
+          if-no-files-found: error
+          retention-days: 30

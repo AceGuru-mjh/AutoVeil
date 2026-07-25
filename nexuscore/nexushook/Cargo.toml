@@ -1,0 +1,30 @@
+[package]
+name = "nexushook"
+version = "0.1.0"
+edition = "2021"
+description = "NexusCore innovative zygote injector - Rust-based, ptrace-driven, declaration-first"
+license = "Apache-2.0"
+authors = ["NexusCore Team"]
+
+[[bin]]
+name = "nexushook"
+path = "src/main.rs"
+
+[lib]
+name = "nexushook"
+path = "src/lib.rs"
+
+[dependencies]
+# MVP 零外部依赖原则：所有逻辑用 std 实现，避免 Rust 生态对 Android NDK 兼容性问题
+# 后续可按需引入 libc / nix / once_cell
+
+[profile.release]
+opt-level = "z"        # 最小体积
+lto = true
+codegen-units = 1
+panic = "abort"        # panic 直接 abort，避免 unwind 在 Android bionic 上的兼容问题
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true

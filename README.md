@@ -1,175 +1,279 @@
-# AutoVeil / NexusCore
+<div align="center">
 
-> **建立在 Magisk / KernelSU / APatch 之上的用户态模块运行时（userspace module runtime）**
+# 🛡️ NexusCore
+
+### 独立 Android Root 框架 · 与 Magisk / KernelSU / APatch 同级
+
+**Android 14+ · Rust + C++ + Kotlin · 自研 Boot Patcher · 自研 SU · 自研 Zygote 注入**
+
+[![Build Manager APK](https://github.com/AceGuru-mjh/AutoVeil/actions/workflows/manager.yml/badge.svg)](https://github.com/AceGuru-mjh/AutoVeil/actions/workflows/manager.yml)
+[![Build & Test Daemon](https://github.com/AceGuru-mjh/AutoVeil/actions/workflows/daemon.yml/badge.svg)](https://github.com/AceGuru-mjh/AutoVeil/actions/workflows/daemon.yml)
+[![Build NexusHook](https://github.com/AceGuru-mjh/AutoVeil/actions/workflows/nexushook.yml/badge.svg)](https://github.com/AceGuru-mjh/AutoVeil/actions/workflows/nexushook.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+</div>
+
+---
+
+## 📖 项目定位
+
+> **NexusCore 是独立的 Android Root 框架，与 Magisk / KernelSU / APatch 同级竞争。**
 >
-> ⚠️ **重要定位**：NexusCore **不提供 root，不提供 su**。它必须安装在有 Magisk / KSU / APatch
-> 的设备上，作为这些底层 root 框架的"模块管理与运行时层"。如果你只想要 root，请直接用
-> Magisk / KSU / APatch；如果你想做模块开发，希望有声明式清单、capabilities 强制校验、
-> 独立 mount namespace 沙盒、统一 Manager UI，NexusCore 是更现代化的选择。
+> 自研 Boot Image Patcher、自研 SU 授权系统、自研 SELinux 策略工具、自研 Zygote 注入器。
+> 不依赖任何其他 root 框架，不抄 Magisk 代码，所有核心组件原创实现。
 
-## 状态
-
-| 组件 | 状态 | 说明 |
-|---|---|---|
-| `specs/` 设计文档 | ✅ 已完成 | 3 份 spec，约 16 万字，覆盖 daemon / manager / module SDK |
-| `manager/` Android 客户端 | ✅ UI 完整 | Jetpack Compose，6 个页面，IPC + MVVM |
-| `daemon/` C++ Root 守护进程 | 🚧 MVP 骨架 | 详见 [daemon/README.md](nexuscore/daemon/README.md) |
-| `modules/` 示例模块 | ✅ 2 个 | `nexus_prop_editor`（build.prop 演示）、`nexus_hosts_editor`（推荐使用） |
-| `web/` 知识图谱 | ✅ 已完成 | [web/index.html](nexuscore/web/index.html) |
-| 测试 | 🚧 占位 | daemon 单元测试骨架，manager 端尚无测试 |
-| CI/CD | 🚧 未配置 | 计划加入 GitHub Actions 编译 manager APK + 校验 daemon C++ |
-
-## 与主流 Root 方案的关系
-
-NexusCore **不是** Magisk / KSU / APatch 的替代品，而是它们的**模块运行时层**：
+### 🏗️ 架构层次
 
 ```
-┌─────────────────────────────────────────┐
-│  Magisk / KSU / APatch (底层 root)       │
-│  - 提供 root 进程能力（CAP_SYS_ADMIN 等）│
-│  - 提供 SELinux 策略注入工具              │
-│  - 启动 nexusd（作为 Magisk 模块的 daemon）│
-└─────────────────────────────────────────┘
-                  ▼ fork & exec
-┌─────────────────────────────────────────┐
-│  nexusd (NexusCore Daemon, 用户态)        │
-│  - 接管模块挂载、脚本执行、SU 策略持久化   │
-│  - 所有 root 能力通过底层 root 授权       │
-│  - 不与底层 root 的 su 冲突（共存模式）   │
-└─────────────────────────────────────────┘
-                  ▼ UDS IPC
-┌─────────────────────────────────────────┐
-│  NexusManager (Android Compose App)       │
-│  - Dashboard / Modules / SuperUser /      │
-│    Logs / Settings / ModuleDetail         │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  NexusCore Boot Patcher (C++)                            │
+│  - 修改 boot.img ramdisk                                 │
+│  - 注入 nexusd 二进制 + nexus.rc service                 │
+│  - 不修改 kernel，绕过 verified boot                     │
+└─────────────────────────────────────────────────────────┘
+                    ▼ 刷入 patched boot.img 后开机
+┌─────────────────────────────────────────────────────────┐
+│  init (Android)                                          │
+│  - 解析 nexus.rc → 启动 nexusd service                   │
+│  - on post-fs-data: nexusd --daemon                      │
+│  - on boot_completed: nexusd --su-daemon                 │
+└─────────────────────────────────────────────────────────┘
+                    ▼ fork
+┌─────────────────────────────────────────────────────────┐
+│  nexusd (NexusCore Daemon, C++)                          │
+│  - SELinux 策略注入（自研 nexuspolicy）                   │
+│  - 模块加载（DMM manifest.json + capabilities）           │
+│  - 文件系统挂载（Bind Mount / OverlayFS）                 │
+│  - 脚本执行（独立 Mount Namespace + shim）                │
+│  - SU 授权守护进程（/dev/socket/nexus_su.sock）           │
+│  - IPC server（/dev/socket/nexusd.sock）                  │
+└─────────────────────────────────────────────────────────┘
+        ▼ UDS IPC                ▼ ptrace + dlopen
+┌──────────────────────────┐  ┌──────────────────────────┐
+│  /system/bin/su          │  │  nexushook (Rust)        │
+│  - setuid root           │  │  Zygote 注入器           │
+│  - 连接 nexus_su.sock    │  │  - 声明式 hook.toml      │
+│  - 透传 stdin/stdout     │  │  - Companion 进程隔离    │
+│                          │  │  - Namespace 隐藏        │
+└──────────────────────────┘  └──────────────────────────┘
+                    ▼ UDS IPC
+┌─────────────────────────────────────────────────────────┐
+│  NexusManager (Kotlin/Compose)                           │
+│  - Dashboard / Modules / SuperUser                       │
+│  - Logs / Settings / Boot Patcher                        │
+│  - SuRequestActivity（独立 exported Activity）            │
+└─────────────────────────────────────────────────────────┘
 ```
 
-详见 [Spec 01 §14](nexuscore/specs/spec-01-daemon.md#14-补充章节与底层-root-的关系定位)。
+---
 
-## 核心特性
+## ✨ 核心能力（与主流 Root 框架同级）
 
-- **声明式模块清单（DMM）**：JSON `manifest.json` 替代 Magisk 的 `module.prop`，支持 capabilities、intents、priority 等结构化字段
-- **Capabilities 强制校验**：未声明的能力一律拒绝执行，比 Magisk 的"脚本可任意作为"更安全
-- **独立 Mount Namespace 脚本沙盒**：每个模块的 `post-fs-data.sh` / `service.sh` 在独立 NS 内执行
-- **四层严格分离**：Manager 客户端绝不直接执行 root 命令，所有 root 操作经 IPC → Daemon
-- **Magisk 兼容 shim**：注入 `ui_print` / `set_perm` / `set_perm_recursive` / `abort` / `MODPATH` 等，降低迁移成本
-- **OverlayFS + Bind Mount 双引擎**：自动探测内核能力，EROFS/动态分区下自动降级
-- **零 Bootloop 设计**：任何 syscall 失败必须有 fallback，绝不导致系统无法启动
+### 🔧 自研 Boot Image Patcher（Phase 2）
 
-## 目录结构
+- **C++ 直接解析 Android Boot Header v0-v4**，不依赖 magiskboot / mkbootimg
+- **自研 CPIO 解析器**（newc 格式），增量追加而非重组 ramdisk
+- **不修改 kernel**，仅向 ramdisk 注入 nexusd + nexus.rc
+- **支持 vendor_boot v3-v4**（GKI 设备）
+- **SHA1 更新**（v0-v2 的 id 字段）
+
+### 🛡️ 自研 SU 授权系统（Phase 3）
+
+- **独立 su 二进制**（`/system/bin/su`），setuid root 但只做透传
+- **真正的 root shell 由 daemon fork**，客户端无法绕过
+- **策略持久化用 JSON**（Magisk 用 SQLite）
+- **不依赖 AIDL**（Magisk 用 IRootServices.aidl）
+- **支持 PTY 双向透传**，交互式 shell 体验
+
+### 🚀 自研 init 注入（Phase 4）
+
+- **nexus.rc service 定义**，init 在 post-fs-data 自动启动
+- **bootstrap 脚本**首次启动标记 `.bootstrapped`
+- **卸载支持**：`.uninstall_pending` 标记触发 boot 恢复
+
+### 🔒 自研 SELinux 策略工具（Phase 5）
+
+- **nexuspolicy** 二进制替代 magiskpolicy
+- **不抄 libsepol**，自研策略注入路径
+- **支持 --live 单条规则 / --apply 批量规则**
+
+### 🪝 自研 Zygote 注入器 NexusHook（Rust）
+
+- **ptrace + dlopen 注入**（Magisk Zygisk 用 LD_PRELOAD，完全不同）
+- **声明式 hook.toml**（模块无需写 C++ 代码）
+- **Companion 进程隔离**（模块崩溃不拖死 zygote）
+- **PID + net namespace 隐藏**（不修改 mount table）
+- **完整 ELF64 解析器**（自研，用于符号查找）
+
+### 📦 Magisk 兼容层（Phase 5）
+
+- **module.prop KV 解析**，自动转换为 DMM JSON
+- **shim 函数注入**：`ui_print` / `set_perm` / `set_perm_recursive` / `abort` / `MODPATH`
+- **现有 Magisk 模块脚本可零修改运行**（除 Zygisk 模块需用 NexusHook 替代）
+
+### 🎨 现代化 Manager UI
+
+- **Jetpack Compose** + Material 3 + 毛玻璃设计
+- **6 个核心页面 + Boot Patcher 页面**
+- **SuRequestActivity 独立 Activity**（daemon 通过 `am start` 唤起，App 后台也能弹授权）
+
+---
+
+## 📊 项目状态（真实情况）
+
+| 组件 | 状态 | 详情 |
+|------|------|------|
+| 📐 `specs/` 设计文档 | ✅ **完成** | 3 份 spec，约 17 万字 |
+| 📱 `manager/` Android 客户端 | ✅ **UI 完整** | Compose 7 页面，IPC + MVVM + 单元测试 |
+| 🔧 `daemon/` C++ 守护进程 | 🚧 **MVP 实现** | 30+ 文件，Boot Patcher + SU + SELinux + 模块系统 |
+| ⚙️ `nexushook/` Rust Zygote 注入器 | 🚧 **骨架实现** | ptrace + companion + denylist，含 33 个单元测试 |
+| 📦 `modules/` 示例模块 | ✅ **2 个** | `nexus_prop_editor` + `nexus_hosts_editor` |
+| 🤖 CI/CD | ✅ **已配置** | GitHub Actions: manager APK / daemon C++ / nexushook Rust |
+| 🧪 单元测试 | 🚧 **部分覆盖** | daemon 38 个 / nexushook 33 个 / manager 60+ 个 |
+| 📦 实机测试 | ❌ **未进行** | 需 Android 14+ 设备 + 解锁 bootloader |
+
+---
+
+## 🆚 与主流 Root 方案对比
+
+| 维度 | Magisk | KernelSU | APatch | **NexusCore** |
+|---|:---:|:---:|:---:|:---:|
+| 提供 root | ✅ | ✅ | ✅ | ✅ **自研 boot patcher** |
+| 提供 su | ✅ | ✅ | ✅ | ✅ **自研 su daemon** |
+| SELinux 策略 | magiskpolicy | 内核 hook | KPM | ✅ **自研 nexuspolicy** |
+| Zygote 注入 | Zygisk (C++) | ZygiskNext | Zygisk | ✅ **NexusHook (Rust)** |
+| 模块清单 | module.prop | 同 Magisk | 同 Magisk | ✅ DMM JSON（更先进） |
+| Capabilities 强制校验 | ❌ | ❌ | ❌ | ✅ |
+| 进程隔离 | ❌ | ❌ | ❌ | ✅ Companion |
+| Magisk 模块兼容 | ✅ | ✅ | ✅ | ✅ 兼容层 |
+| Boot 修补方式 | 修改 ramdisk | 内核模块 | 内核补丁 | ✅ 修改 ramdisk（不抄 Magisk） |
+| 目标 Android | 8+ | 12+ GKI | ARM64 | 14+ |
+| 实现语言 | C++ | C/Kernel | C/KPM | **C++ + Rust + Kotlin** |
+
+---
+
+## 📂 目录结构
 
 ```
-AutoVeil/
-├── README.md                              # 本文件
+AutoVeil/                                  # 仓库
+├── README.md
+├── .github/workflows/                     # CI/CD
 └── nexuscore/
-    ├── daemon/                            # C++ Root 守护进程 (nexusd)
-    │   ├── CMakeLists.txt
-    │   ├── include/nexus/                 # 头文件
-    │   ├── src/                           # 实现源文件
-    │   ├── proto/nexus.proto              # 与 manager 共享的 IPC schema
-    │   ├── scripts/                       # 安装脚本（Magisk 模块包装）
-    │   ├── tests/                         # 单元测试
-    │   └── README.md
+    ├── daemon/                            # C++ Root 守护进程
+    │   ├── include/nexus/
+    │   │   ├── boot/boot_patcher.h        # 🆕 自研 Boot Patcher
+    │   │   ├── su_daemon.h                # 🆕 自研 SU 守护进程
+    │   │   ├── magisk_compat.h            # 🆕 Magisk 兼容层
+    │   │   ├── ipc/                       # IPC server
+    │   │   ├── fs/                        # 文件系统拦截器
+    │   │   └── ...
+    │   ├── src/
+    │   │   ├── boot/                      # 🆕 boot_patcher + nexus_rc
+    │   │   ├── su_daemon.cpp              # 🆕 SU 守护进程
+    │   │   ├── su_client_main.cpp         # 🆕 su 客户端二进制
+    │   │   ├── magisk_compat.cpp          # 🆕 Magisk 兼容层
+    │   │   ├── nexuspolicy_main.cpp       # 🆕 SELinux 策略工具
+    │   │   └── ...
+    │   ├── tests/                         # 38 个单元测试
+    │   └── CMakeLists.txt                 # 编译 nexusd / nexuscli / su / nexuspolicy
     ├── manager/                           # Kotlin/Compose 客户端
-    │   ├── app/
-    │   │   ├── build.gradle.kts
-    │   │   └── src/main/
-    │   │       ├── AndroidManifest.xml
-    │   │       ├── java/com/nexus/manager/
-    │   │       └── proto/nexus.proto      # 与 daemon 共享
-    │   └── README.md
+    │   └── app/src/main/.../pages/
+    │       └── BootPatcherPage.kt         # 🆕 Boot Patcher UI
+    ├── nexushook/                         # 🦀 Rust Zygote 注入器
+    │   └── src/
+    │       ├── ptrace_injector.rs         # ptrace + dlopen + ELF 解析
+    │       ├── zygote_watcher.rs          # zygote fork 监听
+    │       ├── companion_process.rs       # companion 实际 fork
+    │       └── ...
     ├── modules/                           # 示例模块
-    │   ├── nexus_prop_editor/             # build.prop 演示（Android 14+ 上不可靠）
-    │   └── nexus_hosts_editor/            # hosts 编辑器（推荐使用）
     ├── sdk/                               # 模块开发者 SDK
-    │   ├── nexus_module.schema.json       # manifest.json JSON Schema
-    │   └── docs/developer-guide.md
-    ├── specs/                             # 开发规约文档
-    │   ├── spec-01-daemon.md              # Daemon 核心架构
-    │   ├── spec-02-manager.md             # NexusManager
-    │   └── spec-03-module-sdk.md          # Module SDK
+    ├── specs/                             # 开发规约
     └── web/
-        └── index.html                     # 知识图谱站点
 ```
 
-## 快速开始
+---
 
-### 1. 安装底层 Root（前置条件）
+## 🚀 快速开始
 
-任选其一：[Magisk](https://github.com/topjohnwu/Magisk) / [KernelSU](https://github.com/tiann/KernelSU) / [APatch](https://github.com/bmax121/APatch)。
-
-### 2. 编译 NexusManager APK
+### 1️⃣ 编译所有组件
 
 ```bash
-cd nexuscore/manager
-./gradlew :app:assembleRelease
-# 产出：app/build/outputs/apk/release/app-release.apk
-adb install app/build/outputs/apk/release/app-release.apk
-```
+# Manager APK
+cd nexuscore/manager && ./gradlew :app:assembleDebug
 
-### 3. 编译并部署 nexusd
-
-```bash
-# 需要 NDK r26d+
-export NDK=/path/to/android-ndk
+# Daemon + su + nexuspolicy（需要 NDK r26d+）
 cd nexuscore/daemon
 cmake -B build-arm64 \
     -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
-    -DANDROID_ABI=arm64-v8a \
-    -DANDROID_PLATFORM=android-34 \
-    -DANDROID_STL=c++_static
+    -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-34
 cmake --build build-arm64 -j
 
-# 推送到设备（通过 Magisk 模块包装，详见 daemon/scripts/customize.sh）
-adb push build-arm64/nexusd /data/local/tmp/nexusd
-adb shell "su -c 'mkdir -p /data/adb/nexuscore/bin && cp /data/local/tmp/nexusd /data/adb/nexuscore/bin/nexusd && chmod 755 /data/adb/nexuscore/bin/nexusd'"
-adb reboot
+# NexusHook（需要 Rust）
+cd nexuscore/nexushook
+cargo build --release --target aarch64-linux-android
 ```
 
-### 4. 安装示例模块
+### 2️⃣ 安装 NexusManager
 
 ```bash
-cd nexuscore/modules/nexus_hosts_editor
-./build.sh
-# 产出 dist/nexus_nexus_hosts_editor_1.0.0.zip
-# 在 NexusManager 中"从本地 ZIP 安装"
+adb install nexuscore/manager/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## 开发规约
+### 3️⃣ 修补 boot.img
+
+1. 获取设备的 boot.img（fastboot boot 备份 / 固件包提取）
+2. 打开 NexusManager → 设置 → "修补 boot.img"
+3. 选择 boot.img 文件
+4. Manager 调用 daemon 修补，输出到 `/sdcard/Download/nexus_patched_boot.img`
+
+### 4️⃣ 刷入修补后的 boot.img
+
+```bash
+adb reboot bootloader
+fastboot flash boot /sdcard/Download/nexus_patched_boot.img
+fastboot reboot
+```
+
+### 5️⃣ 验证 root
+
+```bash
+adb shell su -c id
+# 应输出: uid=0(root) gid=0(root) groups=...
+```
+
+---
+
+## 📐 设计原则
+
+1. **独立 Root 框架**，不依赖 Magisk/KSU/APatch
+2. **不抄 Magisk 代码**，所有核心组件原创实现
+3. **仅用户态 syscall**，绝不编写内核模块 (.ko)
+4. **任何 syscall 失败必须有 fallback**，绝不导致 Bootloop
+5. **客户端绝不直接执行 Root 命令**，所有 Root 操作经 IPC → Daemon
+6. **声明式模块清单 (DMM)**，未声明的能力一律拒绝
+7. **进程隔离**，hook 模块崩溃不拖死 zygote
+
+---
+
+## 📚 开发规约
 
 - [Spec 01 — Daemon 核心架构](nexuscore/specs/spec-01-daemon.md)
 - [Spec 02 — NexusManager](nexuscore/specs/spec-02-manager.md)
 - [Spec 03 — Module SDK](nexuscore/specs/spec-03-module-sdk.md)
-- [开发者指南](nexuscore/sdk/docs/developer-guide.md)
+- [NexusHook 设计文档](nexuscore/nexushook/README.md)
 
-## 设计原则
+---
 
-1. 仅用户态 syscall，绝不编写内核模块 (.ko)
-2. 任何 syscall 失败必须有 fallback，绝不导致 Bootloop
-3. 客户端绝不直接执行 Root 命令，所有 Root 操作经 IPC → Daemon
-4. 声明式模块清单 (DMM)，未声明的能力一律拒绝
+## 📄 License
 
-## 目标系统
+Apache-2.0。所有代码原创，未参考 Magisk Zygisk / Riru / LSPosed / KernelSU / APatch 源代码。
 
-Android 14 / 15 / 16 (API 34+), arm64-v8a
+---
 
-## 命名说明
+<div align="center">
 
-仓库 `AutoVeil` 是项目代号（最初定位自动化与隐私增强），内部代号 `NexusCore`。
-GitHub 仓库保留 `AutoVeil` 不变（避免历史链接失效），但所有文档与代码内部统一使用
-`NexusCore` 作为产品名。如果你看到任何 `AutoVeil` 与 `NexusCore` 混用，请理解它们是
-同一个项目的不同代号。
+**⚠️ 警告：root 设备有安全风险。本项目处于 MVP 阶段，不建议在生产设备使用。**
 
-## 贡献
+Made with ❤️ by NexusCore Team
 
-详见 [CONTRIBUTING.md](CONTRIBUTING.md)（待补）。当前最需要的贡献方向：
-- daemon RPC handlers 真实实现（当前为占位）
-- 单元测试覆盖（daemon 端 + manager 端）
-- CI/CD pipeline
-- Magisk 模块仓库索引（Phase 2）
-- Zygisk 等价物（Phase 3）
-
-## License
-
-待定（建议 Apache 2.0 或 MIT）。
+</div>

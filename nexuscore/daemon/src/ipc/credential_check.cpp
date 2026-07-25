@@ -13,7 +13,7 @@ Result<PeerCredential> CredentialCheck::readPeer(int fd) {
     struct ucred uc;
     socklen_t len = sizeof(uc);
     if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &uc, &len) < 0) {
-        return std::unexpected(Err::IoError);
+        return {unexpect, Err::IoError};
     }
     PeerCredential p;
     p.pid = uc.pid;
@@ -43,7 +43,7 @@ Result<void> CredentialCheck::authorize(const PeerCredential& peer) {
     // 这里简化：允许 UID >= 10000（普通 app）+ 1000 (system)
     if (peer.uid != 1000 && peer.uid < 10000) {
         NX_LOG_W("Cred", "rejected uid=%d (< 10000 and not system)", peer.uid);
-        return std::unexpected(Err::Unauthorized);
+        return {unexpect, Err::Unauthorized};
     }
 
     // 2) 包名校验（cmdline 第一个参数）
@@ -51,7 +51,7 @@ Result<void> CredentialCheck::authorize(const PeerCredential& peer) {
     if (peer.packageName != "com.nexus.manager" &&
         peer.packageName != "com.nexus.manager.debug") {
         NX_LOG_W("Cred", "rejected pkg=%s", peer.packageName.c_str());
-        return std::unexpected(Err::Unauthorized);
+        return {unexpect, Err::Unauthorized};
     }
 
     // 3) SELinux 域校验（整改 #4：原 find("u:r:untrusted_app:s0") 匹配不到
@@ -64,7 +64,7 @@ Result<void> CredentialCheck::authorize(const PeerCredential& peer) {
         !inDomain(peer.selinuxContext, "u:r:platform_app") &&
         !inDomain(peer.selinuxContext, "u:r:system_app")) {
         NX_LOG_W("Cred", "rejected selinux ctx=%s", peer.selinuxContext.c_str());
-        return std::unexpected(Err::Unauthorized);
+        return {unexpect, Err::Unauthorized};
     }
 
     // 4) APK 签名指纹校验（防伪 Manager）

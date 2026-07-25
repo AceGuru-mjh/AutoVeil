@@ -10,6 +10,17 @@
     <!-- 前台服务（未来扩展） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
+    <!--
+        Phase 6：自定义权限保护 SuRequestActivity
+        声明此权限后，只有持有此权限的进程（即 daemon 通过 setPermissions 授权）才能启动 SuRequestActivity。
+        第三方 app 默认不持有此权限，无法直接启动。
+    -->
+    <permission
+        android:name="nexus.permission.SU_REQUEST"
+        android:protectionLevel="signature|privileged"
+        android:label="NexusCore SU Request"
+        android:description="@string/su_request_perm_desc" />
+
     <application
         android:name=".NexusApp"
         android:allowBackup="false"
@@ -32,14 +43,37 @@
         </activity>
 
         <!--
-            SuRequest 接收 Daemon 推送的 root 请求。
-            整改 B6：原来 activity-alias exported=false 且 targetActivity=MainActivity，
-            daemon 无法通过 am start 唤起 Manager 弹窗（应用未在前台时请求被静默吞）。
-            改为真正的独立 Activity（Phase 2 实现），此处先保留 alias 作为兼容入口。
+            Phase 6：SuRequest 独立 Activity
+            - exported=true：允许 daemon (root) 通过 `am start` 启动
+            - permission="nexus.permission.SU_REQUEST"：仅持有此权限的进程可启动
+            - launchMode="singleTask"：避免重复创建实例
+            - excludeFromRecents="true"：不在最近任务列表显示（安全考虑）
+            - noHistory="true"：用户切走后自动 finish（防止悬空授权）
+            - taskAffinity=""：独立 task，避免与主 Activity 混在一起
+
+            daemon 通过如下命令唤起本 Activity：
+              am start --user 0 \
+                -n com.nexus.manager/.SuRequestActivity \
+                --es package_name com.example.app \
+                --ei uid 10042 \
+                --ei pid 12345 \
+                --es command "su -c id"
         -->
-        <activity-alias
+        <activity
             android:name=".SuRequestActivity"
+            android:exported="true"
+            android:permission="nexus.permission.SU_REQUEST"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.NexusManager"
+            android:label="@string/su_request_title" />
+
+        <!-- 兼容旧版 daemon 的 activity-alias（标记 deprecated） -->
+        <activity-alias
+            android:name=".SuRequestActivityAlias"
             android:exported="false"
-            android:targetActivity=".MainActivity" />
+            android:targetActivity=".SuRequestActivity" />
     </application>
 </manifest>

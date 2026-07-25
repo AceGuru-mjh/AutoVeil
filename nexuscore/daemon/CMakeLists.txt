@@ -81,6 +81,11 @@ set(NEXUSD_SOURCES
     src/ipc/codec.cpp
     src/ipc/handlers.cpp
     src/ipc/manager_uid_resolver.cpp
+    # Phase 2-5: 独立 Root 框架新增
+    src/boot/boot_patcher.cpp
+    src/boot/nexus_rc.cpp
+    src/su_daemon.cpp
+    src/magisk_compat.cpp
 )
 
 add_executable(nexusd ${NEXUSD_SOURCES})
@@ -96,6 +101,15 @@ target_link_libraries(nexusd PRIVATE
     log       # __android_log_print
     cutils    # property_get 等
 )
+
+# Phase 2: boot_patcher 用 SHA1，需要链接 libssl/libcrypto
+# host 平台用 OpenSSL，Android NDK 用 BoringSSL
+if(ANDROID)
+    target_link_libraries(nexusd PRIVATE crypto ssl)
+else()
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(nexusd PRIVATE OpenSSL::Crypto OpenSSL::SSL)
+endif()
 
 # 静态链接减少依赖
 if(ANDROID)
@@ -122,6 +136,32 @@ target_include_directories(nexuscli PRIVATE
 )
 target_link_libraries(nexuscli PRIVATE log)
 
+# ============ su (SU 客户端二进制) ============
+# Phase 3：独立的 su 二进制，安装在 /system/bin/su
+# setuid root 但只做"连接到 daemon + 透传 IO"，真正 root shell 由 daemon fork
+add_executable(su
+    src/su_client_main.cpp
+    src/log.cpp
+)
+target_include_directories(su PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/third_party
+)
+target_link_libraries(su PRIVATE log)
+
+# ============ nexuspolicy (SELinux 策略工具，替代 magiskpolicy) ============
+add_executable(nexuspolicy
+    src/nexuspolicy_main.cpp
+    src/log.cpp
+    src/util.cpp
+    src/types.cpp
+)
+target_include_directories(nexuspolicy PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/third_party
+)
+target_link_libraries(nexuspolicy PRIVATE log)
+
 # ============ 单元测试（仅在非 Android 平台编译） ============
 if(NOT ANDROID)
     enable_testing()
@@ -129,6 +169,6 @@ if(NOT ANDROID)
 endif()
 
 # ============ install ============
-install(TARGETS nexusd nexuscli
+install(TARGETS nexusd nexuscli su nexuspolicy
     RUNTIME DESTINATION bin
 )

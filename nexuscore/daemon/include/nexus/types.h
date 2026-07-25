@@ -10,11 +10,17 @@
 
 namespace nexus {
 
+// ============ unexpect_t tag (替代 C++23 std::unexpected) ============
+// Phase 1.1 修复：原代码用 std::unexpected 需要 C++23，但 CMake 设置 C++17。
+// 改用 tag type + 构造函数重载，行为等价但不依赖 <expected>。
+struct unexpect_t {};
+inline constexpr unexpect_t unexpect{};
+
 // ============ Result<T, E> 简化实现 ============
 // C++23 的 std::expected 尚未广泛可用，自己实现一个最小版本。
 // 用法：
 //   Result<int> foo() { return 42; }
-//   Result<int> bar() { return std::unexpected(Err::IoError); }
+//   Result<int> bar() { return {unexpect, Err::IoError}; }
 //
 //   auto r = foo();
 //   if (!r) { ... r.error() ... }
@@ -40,9 +46,14 @@ const char* errString(Err e);
 template <typename T, typename E = Err>
 class Result {
 public:
+    // 成功构造
     Result(T v) : value_(std::move(v)), has_value_(true) {}
-    Result(std::unexpected<E> e) : error_(e.value()), has_value_(false) {}
-    Result(E e) : error_(e), has_value_(false) {}
+
+    // 失败构造（tag 方式，避免与成功构造歧义）
+    Result(unexpect_t, E e) : error_(e), has_value_(false) {}
+
+    // 兼容旧代码：直接传 E（标记为 explicit 避免隐式转换歧义）
+    explicit Result(E e) : error_(e), has_value_(false) {}
 
     explicit operator bool() const { return has_value_; }
     bool has_value() const { return has_value_; }
@@ -50,6 +61,14 @@ public:
     T& operator*() { return value_; }
     const T& operator*() const { return value_; }
     T* operator->() { return &value_; }
+    const T* operator->() const { return &value_; }
+
+    T& value() { return value_; }
+    const T& value() const { return value_; }
+
+    T value_or(T default_v) const {
+        return has_value_ ? std::move(value_) : default_v;
+    }
 
     E error() const { return error_; }
 
@@ -63,9 +82,10 @@ private:
 template <typename E>
 class Result<void, E> {
 public:
+    // 成功构造
     Result() : has_value_(true) {}
-    Result(std::unexpected<E> e) : error_(e.value()), has_value_(false) {}
-    Result(E e) : error_(e), has_value_(false) {}
+    Result(unexpect_t, E e) : error_(e), has_value_(false) {}
+    explicit Result(E e) : error_(e), has_value_(false) {}
 
     explicit operator bool() const { return has_value_; }
     bool has_value() const { return has_value_; }
@@ -89,6 +109,9 @@ enum class RootProvider {
     Magisk,
     KernelSU,
     APatch,
+    /// Phase 1：NexusCore 自身作为独立 Root 框架（不依赖其他 root）
+    /// 通过自研 boot patcher 修改 boot.img 注入 init service 实现
+    NexusCore,
 };
 
 const char* rootProviderName(RootProvider p);

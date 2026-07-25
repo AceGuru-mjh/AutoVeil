@@ -1,4 +1,6 @@
 import com.google.protobuf.gradle.id
+import java.io.File
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -35,7 +37,7 @@ android {
             // 改为：通过 local.properties 读取 release keystore 路径与密码（不入库）；
             //       未配置时回退到 debug key 并打 warning，方便 CI 与本地未配置开发者继续构建。
             signingConfig = run {
-                val props = java.util.Properties()
+                val props = Properties()
                 val localProps = rootProject.file("local.properties")
                 if (localProps.exists()) {
                     localProps.inputStream().use { props.load(it) }
@@ -112,6 +114,21 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.protobuf.javalite)
+
+    // ============ 单元测试 ============
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("com.google.truth:truth:1.4.4")
+    testImplementation("org.mockito:mockito-core:5.14.2")
+    testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
+    testImplementation("androidx.arch.core:core-testing:2.2.0")
+
+    // Android 仪器测试
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 
 protobuf {

@@ -9,21 +9,23 @@
 #include <memory>
 #include <string>
 
-namespace nexus::ipc {
+namespace nexus {
+
+// 前向声明
+class DaemonCore;
+
+namespace ipc {
 
 // RPC 请求处理器
 //
 // 根据 Envelope.request.payload case 分发到对应 handler。
-// 每个 handler 接收请求参数，返回 Response payload。
-//
-// 设计：handler 不直接持有 fd，通过 callback 推送事件或返回响应。
+// Phase B：所有 handler 真实调用 DaemonCore 方法，不再返回 dummy 数据。
 class Handlers {
 public:
     struct Context {
         PeerCredential peer;
         EventBus& bus;
-        // 注入的组件
-        class DaemonCore* core;
+        DaemonCore* core;   // 不再为 nullptr，由 IpcServer 注入
     };
 
     // 处理一条已解码的 Request，返回 Response payload
@@ -51,6 +53,8 @@ private:
     // 构造 success / error Response
     std::vector<uint8_t> makeResponse(int code, const std::string& msg);
     std::vector<uint8_t> makeOk();
+    std::vector<uint8_t> makeError(int code, const std::string& msg);
 };
 
 } // namespace nexus::ipc
+} // namespace nexus

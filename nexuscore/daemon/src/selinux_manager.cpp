@@ -2,7 +2,9 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#ifdef __ANDROID__
 #include <cutils/properties.h>
+#endif
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
@@ -16,9 +18,14 @@ std::string SELinuxManager::currentContext() {
 }
 
 bool SELinuxManager::setContext(const std::string& ctx) {
-    int fd = ::open("/proc/self/attr/exec", O_WRONLY | O_CLOEXEC);
+    // Phase 1.7 修复：原写 /proc/self/attr/exec 是设置下次 exec 的 context，
+    // 但 daemon 不 exec，所以原代码无效。改为 /proc/self/attr/current（即时切换）。
+    // 同时 SELinux attr 写入需要 null 终止。
+    int fd = ::open("/proc/self/attr/current", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
-    bool ok = ::write(fd, ctx.data(), ctx.size()) == (ssize_t)ctx.size();
+    std::string nul_terminated = ctx + '\0';
+    bool ok = ::write(fd, nul_terminated.data(), nul_terminated.size()) ==
+              (ssize_t)nul_terminated.size();
     ::close(fd);
     return ok;
 }
@@ -42,6 +49,11 @@ bool SELinuxManager::execPolicyTool(const std::string& rule) {
         case RootProvider::APatch:
             // APatch 通过 kpm 模块注入，shell out 路径需要 kpm 配合
             tool = "/data/adb/ap/apd";
+            break;
+        case RootProvider::NexusCore:
+            // Phase 1：NexusCore 自身作为 root provider
+            // 用自研的 nexuspolicy 工具（基于 libsepol 自研实现）
+            tool = "/data/adb/nexuscore/bin/nexuspolicy";
             break;
         case RootProvider::None:
             return false;
@@ -91,7 +103,7 @@ Result<void> SELinuxManager::patchSelfDomain() {
         if (execPolicyTool(rule)) anyOk = true;
     }
     if (!anyOk) {
-        return std::unexpected(Err::IoError);
+        return {unexpect, Err::IoError};
     }
 
     // 转到 nexus_daemon 域

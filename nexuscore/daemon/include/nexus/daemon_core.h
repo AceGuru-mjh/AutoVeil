@@ -7,6 +7,7 @@
 #include "nexus/script_executor.h"
 #include "nexus/fs/i_file_system_interceptor.h"
 #include "nexus/fs/fs_detector.h"
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -43,7 +44,8 @@ public:
     bool isReadOnly() const { return readOnly_; }
     bool isSafeMode() const { return safeMode_; }
     void setSafeMode(bool s) { safeMode_ = s; }
-    bool isDaemonRunning() const { return running_; }
+    // Phase 1.4 修复：running_ 现在是 atomic，需要 .load()
+    bool isDaemonRunning() const { return running_.load(); }
     uint32_t daemonPid() const { return pid_; }
     std::string_view fsInterceptorName() const;
     uint32_t moduleCount() const { return modules_.size(); }
@@ -115,7 +117,9 @@ private:
 
     bool readOnly_ = false;
     bool safeMode_ = false;
-    bool running_ = false;
+    // Phase 1.4 修复：原 running_ 是普通 bool，跨线程读写有数据竞争。
+    // 改为 std::atomic<bool>。
+    std::atomic<bool> running_{false};
     uint32_t pid_ = 0;
     uint64_t startTimeMs_ = 0;
 

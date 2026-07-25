@@ -57,4 +57,12 @@
     <string name="settings_uninstall_nexuscore">卸载 NexusCore</string>
     <string name="settings_about">关于</string>
     <string name="settings_version">版本</string>
+
+    <!-- Phase 6: SuRequest Activity 相关字符串 -->
+    <string name="su_request_title">Root 授权请求</string>
+    <string name="su_request_perm_desc">允许 NexusCore Daemon 推送 Root 授权请求对话框。仅系统 root 进程持有。</string>
+    <string name="su_request_button_allow">永久允许</string>
+    <string name="su_request_button_allow_once">仅一次</string>
+    <string name="su_request_button_deny">拒绝</string>
+    <string name="su_request_button_later">稍后</string>
 </resources>

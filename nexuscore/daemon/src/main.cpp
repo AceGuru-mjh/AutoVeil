@@ -103,8 +103,8 @@ int main(int argc, char** argv) {
             NX_LOG_E("main", "startReadOnly failed: %s", nexus::errString(r.error()));
             return (int)r.error();
         }
-        // 启动 IPC（只响应 ping / get_status）
-        nexus::ipc::IpcServer server(core->bus());
+        // 启动 IPC（只响应 ping / get_status，core 仍注入但 env 为空）
+        nexus::ipc::IpcServer server(core->bus(), core.get());
         if (auto r = server.start(socketPath); !r) {
             NX_LOG_E("main", "IPC server start failed: %s", nexus::errString(r.error()));
             return (int)r.error();
@@ -145,8 +145,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    // 启动 IPC 服务
-    nexus::ipc::IpcServer server(core->bus());
+    // 启动 IPC 服务（Phase B：注入 core 让 handlers 调用真实方法）
+    nexus::ipc::IpcServer server(core->bus(), core.get());
     if (auto r = server.start(socketPath); !r) {
         NX_LOG_E("main", "IPC server start failed: %s", nexus::errString(r.error()));
         return (int)r.error();

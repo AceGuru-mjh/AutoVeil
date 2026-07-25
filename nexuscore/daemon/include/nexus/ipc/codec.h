@@ -59,6 +59,13 @@ public:
     std::string getStr();
     bool getBool();
     bool atEnd();
+
+    // Phase 1.1 修复：暴露当前位置与剩余数据，供 IpcServer 取 payload
+    size_t position() const { return pos_; }
+    std::vector<uint8_t> remainder() const {
+        return std::vector<uint8_t>(data_.begin() + pos_, data_.end());
+    }
+
 private:
     std::vector<uint8_t> data_;
     size_t pos_ = 0;

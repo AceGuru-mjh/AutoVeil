@@ -2,6 +2,8 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#include <cerrno>
+#include <cstdlib>
 #include <pwd.h>
 #include <sys/stat.h>
 
@@ -13,13 +15,16 @@ std::optional<int> ManagerUidResolver::resolve() {
     if (content) {
         std::string s = trim(*content);
         if (!s.empty()) {
-            try {
-                int uid = std::stoi(s);
-                if (uid > 0) {
-                    NX_LOG_I("ManagerUid", "resolved from manager_uid file: %d", uid);
-                    return uid;
-                }
-            } catch (...) {}
+            // Phase 1.2 修复：std::stoi 在 -fno-exceptions 下抛 std::terminate。
+            // 改用 strtol + errno 检查。
+            errno = 0;
+            char* end = nullptr;
+            long uid = std::strtol(s.c_str(), &end, 10);
+            if (end != s.c_str() && *end == '\0' && errno != ERANGE && uid > 0) {
+                NX_LOG_I("ManagerUid", "resolved from manager_uid file: %ld", uid);
+                return (int)uid;
+            }
+            NX_LOG_W("ManagerUid", "manager_uid file content invalid: '%s'", s.c_str());
         }
     }
 

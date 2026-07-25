@@ -1,0 +1,119 @@
+# NexusCore Daemon - C++ 编译 + 单元测试 CI
+#
+# 在 GitHub Actions 上：
+# 1. host 平台编译 daemon + 跑单元测试
+# 2. Android NDK arm64-v8a 交叉编译验证 daemon 可产出
+
+name: Build & Test Daemon
+
+on:
+  push:
+    branches: [main, fix/comprehensive-overhaul, 'feat/**']
+    paths:
+      - 'nexuscore/daemon/**'
+      - '.github/workflows/daemon.yml'
+  pull_request:
+    paths:
+      - 'nexuscore/daemon/**'
+      - '.github/workflows/daemon.yml'
+
+jobs:
+  host-test:
+    name: Host build + unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+
+      - name: Configure (host, no Android)
+        working-directory: nexuscore/daemon
+        run: |
+          mkdir -p build-host
+          cmake -B build-host \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_STANDARD=17
+
+      - name: Build tests
+        working-directory: nexuscore/daemon
+        run: cmake --build build-host -j --target nexusd_tests
+
+      - name: Run unit tests
+        working-directory: nexuscore/daemon
+        run: |
+          cd build-host
+          ctest --verbose
+          # 直接执行，便于看输出
+          ./nexusd_tests || (echo "TESTS FAILED" && exit 1)
+
+  android-cross-compile:
+    name: Android NDK arm64-v8a cross-compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: host-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up NDK
+        uses: nttld/setup-ndk@v1
+        id: setup_ndk
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Install CMake
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+
+      - name: Configure (Android arm64-v8a)
+        working-directory: nexuscore/daemon
+        env:
+          NDK: ${{ steps.setup_ndk.outputs.ndk-path }}
+        run: |
+          mkdir -p build-arm64
+          cmake -B build-arm64 \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-34 \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build nexusd
+        working-directory: nexuscore/daemon
+        run: cmake --build build-arm64 -j --target nexusd
+
+      - name: Build nexuscli
+        working-directory: nexuscore/daemon
+        run: cmake --build build-arm64 -j --target nexuscli
+
+      - name: Verify binaries
+        working-directory: nexuscore/daemon
+        run: |
+          file build-arm64/nexusd
+          file build-arm64/nexuscli
+          ls -lh build-arm64/nexusd build-arm64/nexuscli
+
+      - name: Upload nexusd binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexusd-arm64
+          path: nexuscore/daemon/build-arm64/nexusd
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload nexuscli binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexuscli-arm64
+          path: nexuscore/daemon/build-arm64/nexuscli
+          if-no-files-found: error
+          retention-days: 30

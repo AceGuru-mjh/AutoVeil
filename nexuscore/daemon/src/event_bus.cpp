@@ -1,6 +1,7 @@
 #include "nexus/event_bus.h"
 #include "nexus/log.h"
 
+#include <algorithm>
 #include <chrono>
 #include <utility>
 
