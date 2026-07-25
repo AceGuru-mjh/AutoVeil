@@ -1,0 +1,24 @@
+# NexusCore top-level gitignore
+.DS_Store
+*.log
+
+# Per-subproject ignore
+/manager/.gradle/
+/manager/build/
+/manager/app/build/
+/manager/local.properties
+/manager/.idea/
+/manager/*.iml
+/manager/.cxx/
+/manager/app/.cxx/
+
+# IDE
+/.idea/
+*.iml
+
+# Build outputs
+*.apk
+*.aab
+
+# OS
+Thumbs.db
