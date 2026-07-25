@@ -7,7 +7,7 @@ name: Build Manager APK
 
 on:
   push:
-    branches: [main, fix/comprehensive-overhaul, 'feat/**']
+    branches: [main, fix/comprehensive-overhaul, fix/**, 'feat/**']
     paths:
       - 'nexuscore/manager/**'
       - '.github/workflows/manager.yml'

@@ -160,7 +160,10 @@ pub fn read_frame(stream: &mut UnixStream) -> io::Result<Vec<u8>> {
     stream.read_exact(&mut len_buf)?;
     let len = u32::from_le_bytes(len_buf) as usize;
     if len > 8 * 1024 * 1024 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame too large",
+        ));
     }
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf)?;

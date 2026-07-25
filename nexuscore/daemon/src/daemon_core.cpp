@@ -2,6 +2,7 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 #include "nexus/fs/fs_detector.h"
+#include "nexus/fs/noop_interceptor.h"
 #include "nexus/selinux_manager.h"
 
 #ifdef __ANDROID__
@@ -9,10 +10,16 @@
 #endif
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/reboot.h>
+#include <string>
 #include <sys/reboot.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <thread>
 #include <unistd.h>
 
 #ifndef NEXUS_VERSION
@@ -276,7 +283,7 @@ Result<DaemonCore::InstallResult> DaemonCore::installModule(const std::string& l
     tmpBuf.push_back('\0');
     char* tmpDirC = ::mkdtemp(tmpBuf.data());
     if (!tmpDirC) {
-        NX_LOG_E("DaemonCore", "mkdtemp failed: %s", ::strerror(errno));
+        NX_LOG_E("DaemonCore", "mkdtemp failed: %s", nexus::errnoString(errno).c_str());
         return {unexpect, Err::IoError};
     }
     std::string tmpDir = tmpDirC;
@@ -320,7 +327,7 @@ Result<DaemonCore::InstallResult> DaemonCore::installModule(const std::string& l
 
     if (::rename(tmpDir.c_str(), finalDir.c_str()) < 0) {
         NX_LOG_E("DaemonCore", "rename %s -> %s failed: %s",
-                 tmpDir.c_str(), finalDir.c_str(), ::strerror(errno));
+                 tmpDir.c_str(), finalDir.c_str(), nexus::errnoString(errno).c_str());
         removeRecursive(tmpDir);
         return {unexpect, Err::IoError};
     }
@@ -423,7 +430,7 @@ bool DaemonCore::reboot(RebootMode mode) {
 #endif
     }
     if (r < 0) {
-        NX_LOG_E("DaemonCore", "reboot failed: %s", ::strerror(errno));
+        NX_LOG_E("DaemonCore", "reboot failed: %s", nexus::errnoString(errno).c_str());
         return false;
     }
     return true;   // 实际 reboot 成功不会到这
@@ -459,50 +466,59 @@ bool DaemonCore::clearLogs(int target) {
 }
 
 // ============ SU 代理 ============
+// Phase 5: 集成 SuDaemon，实现真实 SU 授权系统
 
 void DaemonCore::loadSuState() {
-    // MVP 简化：从 /data/adb/nexuscore/su_policy.json 加载
-    // 完整实现需要 JSON 解析（与 module_loader.cpp 类似）
-    auto content = readFile("/data/adb/nexuscore/su_policy.json");
-    if (!content) return;
-    // TODO: parse JSON
+    // Phase 5: 委托给 SuDaemon 加载持久化策略
+    suDaemon_.loadPolicy();
 }
 
 void DaemonCore::saveSuState() {
-    // TODO: serialize to JSON
+    // Phase 5: 委托给 SuDaemon 持久化
+    suDaemon_.savePolicy();
 }
 
 std::vector<DaemonCore::SuApp> DaemonCore::listSuApps() {
-    return suApps_;
+    // Phase 5: 从 SuDaemon 获取应用列表，转换为 DaemonCore::SuApp
+    auto suApps = suDaemon_.listApps();
+    std::vector<SuApp> result;
+    result.reserve(suApps.size());
+    for (auto& app : suApps) {
+        SuApp a;
+        a.packageName = app.packageName;
+        a.uid = app.uid;
+        a.policy = (int)app.policy;
+        a.lastRequestMs = app.lastRequestMs;
+        a.requestCount = app.requestCount;
+        a.timeoutSec = app.timeoutSec;
+        result.push_back(std::move(a));
+    }
+    return result;
 }
 
 bool DaemonCore::setSuPolicy(const std::string& pkg, uint32_t uid, int policy, uint32_t timeoutSec) {
-    // 详见 spec-01 §14.3：NexusCore 不替代底层 root 的 su，仅作为本地策略 mirror
-    // MVP 简化：写入本地 su_policy.json，由用户手动在底层 root Manager 里同步
-    for (auto& app : suApps_) {
-        if (app.packageName == pkg && app.uid == uid) {
-            app.policy = policy;
-            app.timeoutSec = timeoutSec;
-            saveSuState();
-            NX_LOG_I("DaemonCore", "su policy updated: %s uid=%u policy=%d",
-                     pkg.c_str(), uid, policy);
-            return true;
-        }
-    }
-    SuApp app;
-    app.packageName = pkg;
-    app.uid = uid;
-    app.policy = policy;
-    app.timeoutSec = timeoutSec;
-    suApps_.push_back(app);
-    saveSuState();
-    NX_LOG_I("DaemonCore", "su policy added: %s uid=%u policy=%d",
-             pkg.c_str(), uid, policy);
-    return true;
+    // Phase 5: 委托给 SuDaemon
+    bool ok = suDaemon_.setPolicy(pkg, uid, (SuDaemon::Policy)policy, timeoutSec);
+    NX_LOG_I("DaemonCore", "su policy set: %s uid=%u policy=%d ok=%d",
+             pkg.c_str(), uid, policy, (int)ok);
+    return ok;
 }
 
 std::vector<DaemonCore::SuLogEntry> DaemonCore::listSuLogs() {
-    return suLogs_;
+    // Phase 5: 从 SuDaemon 获取日志，转换为 DaemonCore::SuLogEntry
+    auto suLogs = suDaemon_.listLogs();
+    std::vector<SuLogEntry> result;
+    result.reserve(suLogs.size());
+    for (auto& log : suLogs) {
+        SuLogEntry e;
+        e.timestampMs = log.timestampMs;
+        e.packageName = log.packageName;
+        e.uid = log.uid;
+        e.granted = log.granted;
+        e.command = log.command;
+        result.push_back(std::move(e));
+    }
+    return result;
 }
 
 } // namespace nexus

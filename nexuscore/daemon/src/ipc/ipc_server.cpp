@@ -6,7 +6,9 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
+#include <cstring>
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -114,7 +116,7 @@ void IpcServer::acceptLoop() {
         if (cfd < 0) {
             if (errno == EINTR) continue;
             if (!running_.load()) break;
-            NX_LOG_W("IPC", "accept failed: %s", ::strerror(errno));
+            NX_LOG_W("IPC", "accept failed: %s", nexus::errnoString(errno).c_str());
             continue;
         }
 

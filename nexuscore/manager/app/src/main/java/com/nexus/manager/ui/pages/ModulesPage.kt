@@ -86,13 +86,14 @@ fun ModulesPage(
         }
     }
 
+    // 整改 B9：在 Composable 上下文中提前获取 LocalSnackbar.current
+    val snackbar = com.nexus.manager.ui.components.LocalSnackbar.current
+
     val zipPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
             // 整改 B2：FileBridge.copyUriToTemp 改为 suspend，必须在协程中调用。
-            // 整改 B9：用全局 LocalSnackbar 替代 Toast，保持 UX 一致。
-            val snackbar = com.nexus.manager.ui.components.LocalSnackbar.current
             kotlinx.coroutines.MainScope().launch {
                 val path = FileBridge.copyUriToTemp(context, uri)
                 if (path != null) {

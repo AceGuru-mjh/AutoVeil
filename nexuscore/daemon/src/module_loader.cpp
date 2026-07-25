@@ -1,4 +1,5 @@
 #include "nexus/module_loader.h"
+#include "nexus/magisk_compat.h"
 #include "nexus/util.h"
 #include "nexus/log.h"
 
@@ -271,9 +272,20 @@ Result<std::vector<ModuleLoader::LoadedModule>> ModuleLoader::scanModules() {
         std::string manifestPath = modulePath + "/manifest.json";
         auto mr = parseManifest(manifestPath);
         if (!mr) {
-            NX_LOG_W("ModuleLoader", "skip %s: invalid manifest (%s)",
-                     name.c_str(), errString(mr.error()));
-            continue;
+            // Phase 6: 尝试 Magisk 兼容 - 检测 module.prop 并自动转换
+            if (MagiskCompat::isMagiskModule(modulePath)) {
+                NX_LOG_I("ModuleLoader", "%s: detected Magisk module, converting...", name.c_str());
+                auto convR = MagiskCompat::convertModule(modulePath);
+                if (convR) {
+                    // 转换成功，重新解析 manifest.json
+                    mr = parseManifest(manifestPath);
+                }
+            }
+            if (!mr) {
+                NX_LOG_W("ModuleLoader", "skip %s: invalid manifest (%s)",
+                         name.c_str(), errString(mr.error()));
+                continue;
+            }
         }
 
         LoadedModule lm;

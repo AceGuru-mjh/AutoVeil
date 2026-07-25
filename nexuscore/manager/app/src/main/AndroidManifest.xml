@@ -2,18 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!--
-        整改 B16：移除 QUERY_ALL_PACKAGES。
-        原声明"为 SuperUser 授权列表需要"，但 SuperUser 列表本应来自 daemon（root 视角），
-        Manager 不需要查询所有 app。该权限触发 Google Play 审核警告，且功能上不需要。
-    -->
-    <!-- 前台服务（未来扩展） -->
+    <!-- Foreground service for future use -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <!--
-        Phase 6：自定义权限保护 SuRequestActivity
-        声明此权限后，只有持有此权限的进程（即 daemon 通过 setPermissions 授权）才能启动 SuRequestActivity。
-        第三方 app 默认不持有此权限，无法直接启动。
+        Custom permission to protect SuRequestActivity.
+        Only processes holding this permission (i.e., daemon via setPermissions)
+        can start SuRequestActivity.
     -->
     <permission
         android:name="nexus.permission.SU_REQUEST"
@@ -43,21 +38,13 @@
         </activity>
 
         <!--
-            Phase 6：SuRequest 独立 Activity
-            - exported=true：允许 daemon (root) 通过 `am start` 启动
-            - permission="nexus.permission.SU_REQUEST"：仅持有此权限的进程可启动
-            - launchMode="singleTask"：避免重复创建实例
-            - excludeFromRecents="true"：不在最近任务列表显示（安全考虑）
-            - noHistory="true"：用户切走后自动 finish（防止悬空授权）
-            - taskAffinity=""：独立 task，避免与主 Activity 混在一起
-
-            daemon 通过如下命令唤起本 Activity：
-              am start --user 0 \
-                -n com.nexus.manager/.SuRequestActivity \
-                --es package_name com.example.app \
-                --ei uid 10042 \
-                --ei pid 12345 \
-                --es command "su -c id"
+            SuRequestActivity: standalone Activity for SU authorization.
+            exported=true: allows daemon (root) to start via 'am start'
+            permission=nexus.permission.SU_REQUEST: only permitted processes can start
+            launchMode=singleTask: avoid duplicate instances
+            excludeFromRecents=true: not shown in recent tasks
+            noHistory=true: auto finish when user navigates away
+            taskAffinity="": independent task
         -->
         <activity
             android:name=".SuRequestActivity"
@@ -70,7 +57,7 @@
             android:theme="@style/Theme.NexusManager"
             android:label="@string/su_request_title" />
 
-        <!-- 兼容旧版 daemon 的 activity-alias（标记 deprecated） -->
+        <!-- Legacy alias for backward compatibility -->
         <activity-alias
             android:name=".SuRequestActivityAlias"
             android:exported="false"

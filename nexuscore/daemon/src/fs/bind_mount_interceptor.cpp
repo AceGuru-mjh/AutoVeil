@@ -2,6 +2,7 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#include <cstring>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -30,14 +31,14 @@ Result<void> BindMountInterceptor::mountOverlay(const MountTarget& t) {
     if (::mount(t.source.c_str(), t.target.c_str(), nullptr,
                 MS_BIND, nullptr) < 0) {
         NX_LOG_W("BindMount", "bind failed for %s: %s",
-                 t.target.c_str(), ::strerror(errno));
+                 t.target.c_str(), nexus::errnoString(errno).c_str());
         return {unexpect, Err::MountFailed};
     }
     // Phase 1.7 修复：原代码只读重挂未检查返回值，失败会留 read-write mount
     if (::mount(t.source.c_str(), t.target.c_str(), nullptr,
                 MS_BIND | MS_REMOUNT | MS_RDONLY, nullptr) < 0) {
         NX_LOG_W("BindMount", "remount RO failed for %s: %s (mount stays RW)",
-                 t.target.c_str(), ::strerror(errno));
+                 t.target.c_str(), nexus::errnoString(errno).c_str());
         // 不致命，但记录（生产应拒绝继续）
     }
     mounted_.push_back(t.target);

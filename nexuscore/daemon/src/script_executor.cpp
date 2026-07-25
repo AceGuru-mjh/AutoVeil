@@ -11,6 +11,7 @@
 #include <poll.h>
 #include <sched.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -153,12 +154,12 @@ ScriptExecutor::ExecResult ScriptExecutor::execute(const ExecOptions& opts) {
             if (::unshare(CLONE_NEWNS) < 0) {
                 // 不致命，继续
                 NX_LOG_W("ScriptExec", "unshare(NEWNS) failed for %s: %s",
-                         opts.moduleId.c_str(), ::strerror(errno));
+                         opts.moduleId.c_str(), nexus::errnoString(errno).c_str());
             } else {
                 // 私有挂载传播，避免影响父进程
                 // Phase 1.3 修复：检查 mount 返回值
                 if (::mount("", "/", "", MS_PRIVATE | MS_REC, nullptr) < 0) {
-                    NX_LOG_W("ScriptExec", "MS_PRIVATE|MS_REC failed: %s", ::strerror(errno));
+                    NX_LOG_W("ScriptExec", "MS_PRIVATE|MS_REC failed: %s", nexus::errnoString(errno).c_str());
                 }
             }
         }

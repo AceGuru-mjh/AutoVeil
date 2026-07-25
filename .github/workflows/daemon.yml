@@ -8,7 +8,7 @@ name: Build & Test Daemon
 
 on:
   push:
-    branches: [main, fix/comprehensive-overhaul, 'feat/**']
+    branches: [main, fix/comprehensive-overhaul, fix/**, 'feat/**']
     paths:
       - 'nexuscore/daemon/**'
       - '.github/workflows/daemon.yml'
@@ -30,7 +30,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y build-essential cmake libssl-dev
 
       - name: Configure (host, no Android)
         working-directory: nexuscore/daemon
@@ -42,15 +42,16 @@ jobs:
 
       - name: Build tests
         working-directory: nexuscore/daemon
-        run: cmake --build build-host -j --target nexusd_tests
+        run: |
+          # host 平台只构建测试可执行文件，不构建 nexusd/su/nexuspolicy
+          # （它们需要 Android 系统库 log/cutils）
+          cmake --build build-host -j --target test_codec test_util test_module_loader test_event_bus test_script_executor test_boot_patcher test_magisk_compat test_su_daemon
 
       - name: Run unit tests
         working-directory: nexuscore/daemon
         run: |
           cd build-host
-          ctest --verbose
-          # 直接执行，便于看输出
-          ./nexusd_tests || (echo "TESTS FAILED" && exit 1)
+          ctest --verbose --output-on-failure || (echo "TESTS FAILED" && exit 1)
 
   android-cross-compile:
     name: Android NDK arm64-v8a cross-compile
@@ -95,12 +96,22 @@ jobs:
         working-directory: nexuscore/daemon
         run: cmake --build build-arm64 -j --target nexuscli
 
+      - name: Build su
+        working-directory: nexuscore/daemon
+        run: cmake --build build-arm64 -j --target su
+
+      - name: Build nexuspolicy
+        working-directory: nexuscore/daemon
+        run: cmake --build build-arm64 -j --target nexuspolicy
+
       - name: Verify binaries
         working-directory: nexuscore/daemon
         run: |
           file build-arm64/nexusd
           file build-arm64/nexuscli
-          ls -lh build-arm64/nexusd build-arm64/nexuscli
+          file build-arm64/su
+          file build-arm64/nexuspolicy
+          ls -lh build-arm64/nexusd build-arm64/nexuscli build-arm64/su build-arm64/nexuspolicy
 
       - name: Upload nexusd binary
         uses: actions/upload-artifact@v4
@@ -115,5 +126,21 @@ jobs:
         with:
           name: nexuscli-arm64
           path: nexuscore/daemon/build-arm64/nexuscli
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload su binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: su-arm64
+          path: nexuscore/daemon/build-arm64/su
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload nexuspolicy binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexuspolicy-arm64
+          path: nexuscore/daemon/build-arm64/nexuspolicy
           if-no-files-found: error
           retention-days: 30

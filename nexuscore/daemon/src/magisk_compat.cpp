@@ -107,17 +107,42 @@ Result<std::string> MagiskCompat::convertToManifest(const std::string& moduleDir
         caps.push_back("MOUNT_FILESYSTEM");
     }
 
+    // Phase 5 修复：JSON 字符串转义函数
+    // 防止 module.prop 中的 " / \ / 换行 破坏 JSON 格式或注入
+    auto escapeJson = [](const std::string& s) -> std::string {
+        std::string out;
+        out.reserve(s.size() + 8);
+        for (char c : s) {
+            switch (c) {
+                case '"':  out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:
+                    if ((unsigned char)c < 0x20) {
+                        char buf[8];
+                        std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                        out += buf;
+                    } else {
+                        out += c;
+                    }
+            }
+        }
+        return out;
+    };
+
     // 生成 JSON
     std::string json = "{\n";
-    json += "  \"id\": \"" + m.id + "\",\n";
-    json += "  \"name\": \"" + m.name + "\",\n";
-    json += "  \"version\": \"" + m.version + "\",\n";
+    json += "  \"id\": \"" + escapeJson(m.id) + "\",\n";
+    json += "  \"name\": \"" + escapeJson(m.name) + "\",\n";
+    json += "  \"version\": \"" + escapeJson(m.version) + "\",\n";
     if (m.versionCode > 0) {
         json += "  \"versionCode\": " + std::to_string(m.versionCode) + ",\n";
     }
-    json += "  \"author\": \"" + m.author + "\",\n";
+    json += "  \"author\": \"" + escapeJson(m.author) + "\",\n";
     if (!m.description.empty()) {
-        json += "  \"description\": \"" + m.description + "\",\n";
+        json += "  \"description\": \"" + escapeJson(m.description) + "\",\n";
     }
     json += "  \"min_nexus_version\": \"1.0\",\n";
     json += "  \"priority\": 0,\n";

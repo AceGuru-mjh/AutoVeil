@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #ifdef __ANDROID__
 #include <pty.h>
@@ -227,8 +228,7 @@ bool SuDaemon::handleRequest(const SuRequest& req) {
         policy = lookupPolicy(req.uid, req.packageName);
     }
 
-    // 2. 若无策略（Deny），通过 EventBus 推送 SuRequestEvent 给 Manager
-    //    Manager 弹出 SuRequestActivity 让用户决定
+    // 2. 若无策略（Deny），通过 am start 唤起 SuRequestActivity 让用户授权
     if (policy == Policy::Deny) {
         // 检查是否在 apps_ 中（区分"无策略"和"已拒绝"）
         bool hasApp = false;
@@ -242,19 +242,91 @@ bool SuDaemon::handleRequest(const SuRequest& req) {
             }
         }
         if (!hasApp) {
-            // 推送请求事件给 Manager
-            // Manager 调用 am start SuRequestActivity 弹出对话框
-            // 简化：直接默认拒绝（生产应等待 Manager 响应）
-            NX_LOG_I("SuDaemon", "no policy for uid=%u, defaulting to deny (Manager should handle)",
+            // Phase 3 实现：通过 am start 唤起 SuRequestActivity
+            // daemon 是 root，可以执行 am start 命令
+            NX_LOG_I("SuDaemon", "no policy for uid=%u, invoking SuRequestActivity",
                      req.uid);
-            // TODO: 通过 globalBus().publishSuRequest 推送事件，
-            //       并等待 IPC setSuPolicy 调用
+
+            // 构造 am start 命令
+            // am start --user 0 -n com.nexus.manager/.SuRequestActivity \
+            //   --es package_name <pkg> --ei uid <uid> --ei pid <pid> --es command <cmd>
+            //
+            // 注意：command 可能含特殊字符，需要 base64 编码或用单引号包裹
+            // 这里用单引号 + 转义内部单引号的方式
+            std::string escapedCmd = req.command;
+            // 转义单引号：' -> '\''
+            size_t pos = 0;
+            while ((pos = escapedCmd.find('\'', pos)) != std::string::npos) {
+                escapedCmd.replace(pos, 1, "'\\''");
+                pos += 4;
+            }
+
+            std::string amCmd =
+                "am start --user 0 "
+                "-n com.nexus.manager/.SuRequestActivity "
+                "--es package_name '" + req.packageName + "' "
+                "--ei uid " + std::to_string(req.uid) + " "
+                "--ei pid " + std::to_string(req.pid) + " "
+                "--es command '" + escapedCmd + "' "
+                "> /dev/null 2>&1";
+
+            NX_LOG_I("SuDaemon", "executing: %s", amCmd.c_str());
+            auto r = execCommand(amCmd, 10);
+
+            if (r.exitCode != 0) {
+                NX_LOG_W("SuDaemon", "am start failed (exit=%d): %s",
+                         r.exitCode, r.stderr_.c_str());
+                // fallback：尝试 com.nexus.manager.debug 包名
+                std::string amCmdDebug =
+                    "am start --user 0 "
+                    "-n com.nexus.manager.debug/com.nexus.manager.SuRequestActivity "
+                    "--es package_name '" + req.packageName + "' "
+                    "--ei uid " + std::to_string(req.uid) + " "
+                    "--ei pid " + std::to_string(req.pid) + " "
+                    "--es command '" + escapedCmd + "' "
+                    "> /dev/null 2>&1";
+                NX_LOG_I("SuDaemon", "retrying with debug package: %s", amCmdDebug.c_str());
+                auto r2 = execCommand(amCmdDebug, 10);
+                if (r2.exitCode != 0) {
+                    NX_LOG_E("SuDaemon", "am start debug also failed (exit=%d): %s",
+                             r2.exitCode, r2.stderr_.c_str());
+                    // Manager 未安装或不可启动，默认拒绝
+                    addLog(req, false);
+                    return false;
+                }
+            }
+
+            // am start 成功，等待用户响应
+            // Phase 3 实现：轮询 su_policy.json，等待用户通过 IPC setSuPolicy 设置策略
+            // 超时 60 秒后默认拒绝
+            NX_LOG_I("SuDaemon", "waiting for user response (timeout 60s)...");
+            for (int i = 0; i < 60; ++i) {
+                ::sleep(1);
+                Policy newPolicy;
+                {
+                    std::lock_guard<std::mutex> lk(mu_);
+                    // 重新加载策略（用户可能已通过 IPC 设置）
+                    loadPolicy();
+                    newPolicy = lookupPolicy(req.uid, req.packageName);
+                }
+                if (newPolicy != Policy::Deny) {
+                    NX_LOG_I("SuDaemon", "user responded: policy=%d", (int)newPolicy);
+                    policy = newPolicy;
+                    break;
+                }
+            }
+
+            if (policy == Policy::Deny) {
+                NX_LOG_W("SuDaemon", "user did not respond within 60s, denying");
+                addLog(req, false);
+                return false;
+            }
+            // 用户已授权，继续到 step 3
+        } else {
+            // 已有 Deny 策略
             addLog(req, false);
             return false;
         }
-        // 已有 Deny 策略
-        addLog(req, false);
-        return false;
     }
 
     // 3. 授权
@@ -290,7 +362,7 @@ void SuDaemon::forkRootShell(const SuRequest& req) {
     pid_t pid = ::fork();
 #endif
     if (pid < 0) {
-        NX_LOG_E("SuDaemon", "fork failed: %s", ::strerror(errno));
+        NX_LOG_E("SuDaemon", "fork failed: %s", nexus::errnoString(errno).c_str());
         return;
     }
 

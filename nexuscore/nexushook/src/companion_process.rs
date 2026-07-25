@@ -7,11 +7,12 @@
 //! - 子进程崩溃自动重启
 //! - SELinux 域为 nexus_companion:s0（独立于 zygote）
 
+use std::collections::HashMap;
 use std::io;
+use std::os::unix::io::FromRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::collections::HashMap;
 
 /// 单个 companion 进程信息
 #[derive(Debug)]
@@ -49,15 +50,13 @@ impl CompanionProcessManager {
         let mut comps = self.companions.lock().unwrap();
         if let Some(c) = comps.get(module_id) {
             if c.alive {
-                return Ok(());   // 已存在且活着
+                return Ok(()); // 已存在且活着
             }
         }
 
         // 1. socketpair 创建全双工 UDS
         let mut socks = [0i32; 2];
-        let r = unsafe {
-            libc_socketpair(libc_AF_UNIX, libc_SOCK_STREAM, 0, socks.as_mut_ptr())
-        };
+        let r = unsafe { libc_socketpair(libc_AF_UNIX, libc_SOCK_STREAM, 0, socks.as_mut_ptr()) };
         if r < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -67,7 +66,10 @@ impl CompanionProcessManager {
         // 2. fork
         let pid = unsafe { libc_fork() };
         if pid < 0 {
-            unsafe { libc_close(parent_fd); libc_close(child_fd); }
+            unsafe {
+                libc_close(parent_fd);
+                libc_close(child_fd);
+            }
             return Err(io::Error::last_os_error());
         }
 
@@ -79,12 +81,16 @@ impl CompanionProcessManager {
             // 子进程：dlopen so_path，进入 IPC 循环
             // 注意：dlopen 在子进程内执行（与 ptrace 注入不同）
             let result = child_main(child_fd, &so_path, module_id);
-            unsafe { libc_close(child_fd); }
+            unsafe {
+                libc_close(child_fd);
+            }
             std::process::exit(result);
         }
 
         // ============ parent ============
-        unsafe { libc_close(child_fd); }
+        unsafe {
+            libc_close(child_fd);
+        }
         // 把 parent_fd 包成 UnixStream
         let socket = unsafe { UnixStream::from_raw_fd(parent_fd) };
 
@@ -104,7 +110,9 @@ impl CompanionProcessManager {
         let mut comps = self.companions.lock().unwrap();
         if let Some(c) = comps.get_mut(module_id) {
             if let Some(pid) = c.pid {
-                unsafe { libc_kill(pid as i32, 15 /* SIGTERM */); }
+                unsafe {
+                    libc_kill(pid as i32, 15 /* SIGTERM */);
+                }
             }
             // 关闭 socket
             c.socket.take();
@@ -118,7 +126,9 @@ impl CompanionProcessManager {
         let mut comps = self.companions.lock().unwrap();
         for c in comps.values_mut() {
             if let Some(pid) = c.pid {
-                unsafe { libc_kill(pid as i32, 15); }
+                unsafe {
+                    libc_kill(pid as i32, 15);
+                }
             }
             c.socket.take();
             c.alive = false;
@@ -129,12 +139,16 @@ impl CompanionProcessManager {
     pub fn is_alive(&self, module_id: &str) -> bool {
         let comps = self.companions.lock().unwrap();
         if let Some(c) = comps.get(module_id) {
-            if !c.alive { return false; }
+            if !c.alive {
+                return false;
+            }
             if let Some(pid) = c.pid {
                 let mut status: i32 = 0;
-                let r = unsafe { libc_waitpid(pid as i32, &mut status, 1 /* WNOHANG */) };
+                let r = unsafe {
+                    libc_waitpid(pid as i32, &mut status, 1 /* WNOHANG */)
+                };
                 if r == 0 {
-                    return true;   // 仍在运行
+                    return true; // 仍在运行
                 }
                 // r == pid 表示已退出
                 return false;
@@ -160,14 +174,18 @@ impl CompanionProcessManager {
         args: &[crate::ipc::HookValue],
     ) -> io::Result<crate::ipc::HookValue> {
         let mut comps = self.companions.lock().unwrap();
-        let c = comps.get_mut(module_id).ok_or_else(|| io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("companion {} not found", module_id),
-        ))?;
-        let socket = c.socket.as_mut().ok_or_else(|| io::Error::new(
-            io::ErrorKind::NotConnected,
-            "companion socket not available",
-        ))?;
+        let c = comps.get_mut(module_id).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("companion {} not found", module_id),
+            )
+        })?;
+        let socket = c.socket.as_mut().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "companion socket not available",
+            )
+        })?;
 
         // 构造 HookCall 消息
         let call = crate::ipc::HookCall {
@@ -200,8 +218,12 @@ impl Drop for CompanionProcessManager {
 /// 子进程入口
 fn child_main(socket_fd: i32, so_path: &Path, module_id: &str) -> i32 {
     // 子进程：dlopen .so 并进入 IPC 循环
-    eprintln!("[companion:{}] started, fd={}, so={}",
-              module_id, socket_fd, so_path.display());
+    eprintln!(
+        "[companion:{}] started, fd={}, so={}",
+        module_id,
+        socket_fd,
+        so_path.display()
+    );
 
     // 实际实现：
     // 1. dlopen(so_path) 加载模块 .so
@@ -227,18 +249,22 @@ fn child_main(socket_fd: i32, so_path: &Path, module_id: &str) -> i32 {
                 let call = match deserialize_hook_call(&payload) {
                     Ok(c) => c,
                     Err(_) => {
-                        let _ = crate::ipc::write_frame(&mut stream,
+                        let _ = crate::ipc::write_frame(
+                            &mut stream,
                             &serialize_hook_return(&crate::ipc::HookReturn {
                                 ok: false,
                                 value: crate::ipc::HookValue::Void,
                                 error: "deserialize failed".to_string(),
-                            }));
+                            }),
+                        );
                         continue;
                     }
                 };
                 // MVP: 所有 handler 返回 Void
-                eprintln!("[companion:{}] call hook_id={} handler={}",
-                          module_id, call.hook_id, call.handler);
+                eprintln!(
+                    "[companion:{}] call hook_id={} handler={}",
+                    module_id, call.hook_id, call.handler
+                );
                 let ret = crate::ipc::HookReturn {
                     ok: true,
                     value: crate::ipc::HookValue::Void,
@@ -275,15 +301,21 @@ fn serialize_hook_call(call: &crate::ipc::HookCall) -> Vec<u8> {
 /// 反序列化 HookCall
 fn deserialize_hook_call(data: &[u8]) -> io::Result<crate::ipc::HookCall> {
     use std::convert::TryInto;
-    if data.len() < 4 { return Err(io::Error::new(io::ErrorKind::InvalidData, "too short")); }
+    if data.len() < 4 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "too short"));
+    }
     let mut pos = 0;
     let module_id = read_string(data, &mut pos)?;
-    if pos + 4 > data.len() { return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated")); }
-    let hook_id = u32::from_le_bytes(data[pos..pos+4].try_into().unwrap());
+    if pos + 4 > data.len() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated"));
+    }
+    let hook_id = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
     pos += 4;
     let handler = read_string(data, &mut pos)?;
-    if pos + 4 > data.len() { return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated")); }
-    let args_count = u32::from_le_bytes(data[pos..pos+4].try_into().unwrap()) as usize;
+    if pos + 4 > data.len() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated"));
+    }
+    let args_count = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
     pos += 4;
     let mut args = Vec::with_capacity(args_count);
     for _ in 0..args_count {
@@ -291,7 +323,12 @@ fn deserialize_hook_call(data: &[u8]) -> io::Result<crate::ipc::HookCall> {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "decode arg failed"))?;
         args.push(arg);
     }
-    Ok(crate::ipc::HookCall { module_id, hook_id, handler, args })
+    Ok(crate::ipc::HookCall {
+        module_id,
+        hook_id,
+        handler,
+        args,
+    })
 }
 
 /// 序列化 HookReturn
@@ -305,7 +342,9 @@ fn serialize_hook_return(ret: &crate::ipc::HookReturn) -> Vec<u8> {
 
 /// 反序列化 HookReturn
 fn deserialize_hook_return(data: &[u8]) -> io::Result<crate::ipc::HookReturn> {
-    if data.is_empty() { return Err(io::Error::new(io::ErrorKind::InvalidData, "empty")); }
+    if data.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "empty"));
+    }
     let ok = data[0] != 0;
     let mut pos = 1;
     let value = crate::ipc::HookValue::decode(data, &mut pos)
@@ -323,14 +362,20 @@ fn extend_string(buf: &mut Vec<u8>, s: &str) {
 fn read_string(data: &[u8], pos: &mut usize) -> io::Result<String> {
     use std::convert::TryInto;
     if *pos + 4 > data.len() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated string len"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "truncated string len",
+        ));
     }
-    let len = u32::from_le_bytes(data[*pos..*pos+4].try_into().unwrap()) as usize;
+    let len = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap()) as usize;
     *pos += 4;
     if *pos + len > data.len() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated string"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "truncated string",
+        ));
     }
-    let s = String::from_utf8_lossy(&data[*pos..*pos+len]).to_string();
+    let s = String::from_utf8_lossy(&data[*pos..*pos + len]).to_string();
     *pos += len;
     Ok(s)
 }
@@ -347,25 +392,20 @@ extern "C" {
 const libc_AF_UNIX: i32 = 1;
 const libc_SOCK_STREAM: i32 = 1;
 
-unsafe fn libc_fork() -> i32 { fork() }
-unsafe fn libc_close(fd: i32) -> i32 { close(fd) }
-unsafe fn libc_kill(pid: i32, sig: i32) -> i32 { kill(pid, sig) }
-unsafe fn libc_waitpid(pid: i32, status: *mut i32, options: i32) -> i32 { waitpid(pid, status, options) }
+unsafe fn libc_fork() -> i32 {
+    unsafe { fork() }
+}
+unsafe fn libc_close(fd: i32) -> i32 {
+    unsafe { close(fd) }
+}
+unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
+    unsafe { kill(pid, sig) }
+}
+unsafe fn libc_waitpid(pid: i32, status: *mut i32, options: i32) -> i32 {
+    unsafe { waitpid(pid, status, options) }
+}
 unsafe fn libc_socketpair(domain: i32, ty: i32, protocol: i32, sv: *mut i32) -> i32 {
-    socketpair(domain, ty, protocol, sv)
-}
-
-// UnixStream::from_raw_fd 是 unsafe，需要 trait
-trait FromRawFdExt {
-    unsafe fn from_raw_fd(fd: i32) -> Self;
-}
-
-impl FromRawFdExt for UnixStream {
-    unsafe fn from_raw_fd(fd: i32) -> Self {
-        // std::os::unix::io::FromRawFd 是 stable
-        use std::os::unix::io::FromRawFd;
-        UnixStream::from_raw_fd(fd)
-    }
+    unsafe { socketpair(domain, ty, protocol, sv) }
 }
 
 #[cfg(test)]
@@ -409,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_read_string_empty() {
-        let data = vec![0, 0, 0, 0];   // len = 0
+        let data = vec![0, 0, 0, 0]; // len = 0
         let mut pos = 0;
         let s = read_string(&data, &mut pos).unwrap();
         assert!(s.is_empty());
@@ -418,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_read_string_nonexistent_data() {
-        let data = vec![5, 0, 0, 0];   // len = 5 但没有数据
+        let data = vec![5, 0, 0, 0]; // len = 5 但没有数据
         let mut pos = 0;
         let r = read_string(&data, &mut pos);
         assert!(r.is_err());

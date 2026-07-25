@@ -5,6 +5,7 @@
 #include "nexus/ipc/codec.h"
 #include "nexus/ipc/credential_check.h"
 #include "nexus/module_loader.h"
+#include "nexus/boot/boot_patcher.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -20,6 +21,7 @@ namespace ipc {
 //
 // 根据 Envelope.request.payload case 分发到对应 handler。
 // Phase B：所有 handler 真实调用 DaemonCore 方法，不再返回 dummy 数据。
+// Phase 4：新增 Boot Patcher RPC
 class Handlers {
 public:
     struct Context {
@@ -49,6 +51,10 @@ private:
     std::vector<uint8_t> handleClearLogs(Context& ctx, Decoder& d);
     std::vector<uint8_t> handleReboot(Context& ctx, Decoder& d);
     std::vector<uint8_t> handleUninstallFramework(Context& ctx, Decoder& d);
+
+    // Phase 4: Boot Patcher
+    std::vector<uint8_t> handlePatchBoot(Context& ctx, Decoder& d);
+    std::vector<uint8_t> handleGetBootPatcherStatus(Context& ctx, Decoder& d);
 
     // 构造 success / error Response
     std::vector<uint8_t> makeResponse(int code, const std::string& msg);

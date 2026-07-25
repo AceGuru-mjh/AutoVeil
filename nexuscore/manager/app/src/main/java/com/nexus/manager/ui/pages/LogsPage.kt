@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.nexus.manager.data.bridge.FileBridge
 import com.nexus.manager.data.model.LogLine
 import com.nexus.manager.ui.components.GlassTopBar
@@ -87,12 +88,14 @@ fun LogsPage(
     ) { uri ->
         if (uri != null) {
             val text = viewModel.snapshotText()
-            val ok = FileBridge.writeTextToUri(context, uri, text)
-            android.widget.Toast.makeText(
-                context,
-                if (ok) "日志已导出" else "导出失败",
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
+            kotlinx.coroutines.MainScope().launch {
+                val ok = FileBridge.writeTextToUri(context, uri, text)
+                android.widget.Toast.makeText(
+                    context,
+                    if (ok) "日志已导出" else "导出失败",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
         }
     }
 
