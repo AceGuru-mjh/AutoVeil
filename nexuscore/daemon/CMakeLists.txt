@@ -86,6 +86,9 @@ set(NEXUSD_SOURCES
     src/boot/nexus_rc.cpp
     src/su_daemon.cpp
     src/magisk_compat.cpp
+    # Capability + Permission 系统
+    src/capability/capability_manager.cpp
+    src/permission/no_root_provider.cpp
 )
 
 add_executable(nexusd ${NEXUSD_SOURCES})

@@ -22,6 +22,8 @@
 #include "nexus/selinux_manager.h"
 #include "nexus/daemon_core.h"
 #include "nexus/ipc/ipc_server.h"
+#include "nexus/capability/capability_manager.h"
+#include "nexus/permission/provider.h"
 
 #include <atomic>
 #include <csignal>
@@ -84,6 +86,20 @@ int main(int argc, char** argv) {
     // 信号处理
     std::signal(SIGTERM, signalHandler);
     std::signal(SIGINT,  signalHandler);
+
+    // ====== Phase 2: Capability 检测 ======
+    // 先检测设备能力，生成能力矩阵，后续功能根据能力决定是否启用
+    auto& capability = nexus::CapabilityManager::instance();
+    capability.detect();
+    NX_LOG_I("main", "%s", capability.report().c_str());
+
+    // ====== Phase 3: Permission 初始化 ======
+    // 当前阶段使用 NoRootProvider（用户态核心框架）
+    // 未来切换到 NexusRootProvider / MagiskProvider / KsuProvider
+    nexus::NoRootProvider permissionProvider;
+    NX_LOG_I("main", "permission provider: %s (level=%d)",
+             permissionProvider.name().c_str(),
+             (int)permissionProvider.level());
 
     // PID 文件（防双实例）
     nexus::PidFile pidFile("/dev/nexusd.pid");

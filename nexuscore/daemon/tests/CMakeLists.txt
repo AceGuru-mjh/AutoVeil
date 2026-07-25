@@ -29,6 +29,8 @@ set(NEXUSD_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/src/boot/nexus_rc.cpp
     ${CMAKE_SOURCE_DIR}/src/su_daemon.cpp
     ${CMAKE_SOURCE_DIR}/src/magisk_compat.cpp
+    ${CMAKE_SOURCE_DIR}/src/capability/capability_manager.cpp
+    ${CMAKE_SOURCE_DIR}/src/permission/no_root_provider.cpp
 )
 
 find_package(Threads REQUIRED)
