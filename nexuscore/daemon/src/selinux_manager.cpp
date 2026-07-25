@@ -2,7 +2,9 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#ifdef __ANDROID__
 #include <cutils/properties.h>
+#endif
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>

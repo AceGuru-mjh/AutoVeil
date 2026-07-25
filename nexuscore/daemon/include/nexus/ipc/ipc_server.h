@@ -10,7 +10,12 @@
 #include <thread>
 #include <vector>
 
-namespace nexus::ipc {
+namespace nexus {
+
+// 前向声明，避免循环 include
+class DaemonCore;
+
+namespace ipc {
 
 // IPC 服务端
 //
@@ -21,10 +26,16 @@ namespace nexus::ipc {
 // - 支持事件推送（订阅 logs / su_request）
 //
 // 整改 #5：socket 权限使用 ManagerUidResolver 动态 chown，避免 catch-22。
+//
+// Phase B 改进：增加 core_ 指针，让 handlers 能调用 DaemonCore 真实方法。
 class IpcServer {
 public:
-    IpcServer(EventBus& bus) : bus_(bus) {}
+    IpcServer(EventBus& bus, DaemonCore* core = nullptr)
+        : bus_(bus), core_(core) {}
     ~IpcServer() { stop(); }
+
+    // 注入 DaemonCore（在 main.cpp 创建 core 后调用）
+    void setCore(DaemonCore* core) { core_ = core; }
 
     // 启动服务（监听 + accept 线程）
     Result<void> start(std::string_view socketPath);
@@ -36,6 +47,7 @@ public:
 
 private:
     EventBus& bus_;
+    DaemonCore* core_ = nullptr;
     int listenFd_ = -1;
     std::atomic<bool> running_{false};
     std::thread acceptThread_;
@@ -50,3 +62,4 @@ private:
 };
 
 } // namespace nexus::ipc
+} // namespace nexus

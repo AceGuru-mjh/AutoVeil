@@ -4,7 +4,9 @@
 #include "nexus/fs/fs_detector.h"
 #include "nexus/selinux_manager.h"
 
+#ifdef __ANDROID__
 #include <cutils/properties.h>
+#endif
 #include <chrono>
 #include <sys/reboot.h>
 #include <unistd.h>
@@ -145,7 +147,12 @@ void DaemonCore::watchBootCompleted() {
         // 生产应使用 property_set 等待，但简化用轮询
         while (running_) {
             char val[32] = {0};
+#ifdef __ANDROID__
             ::property_get("sys.boot_completed", val, "0");
+#else
+            // host 测试时直接返回（永远不进入 late_start 分支）
+            std::snprintf(val, sizeof(val), "0");
+#endif
             if (std::string(val) == "1") {
                 NX_LOG_I("DaemonCore", "boot_completed=1; running late_start scripts");
                 if (!safeMode_) {
@@ -323,7 +330,9 @@ bool DaemonCore::reboot(RebootMode mode) {
         case RebootMode::Userspace:
             // 整改 #13：USERSPACE 需要 sys.powerctl 写权限，由 SELinuxManager 已注入
             // 详见 spec-01 §13.2
+#ifdef __ANDROID__
             ::property_set("sys.powerctl", "userspace");
+#endif
             // 备选：fallback 到 NORMAL
             NX_LOG_W("DaemonCore", "userspace reboot requested; fallback may apply");
             return true;

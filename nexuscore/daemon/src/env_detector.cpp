@@ -2,7 +2,9 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#ifdef __ANDROID__
 #include <cutils/properties.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -41,15 +43,21 @@ Result<RootEnvironment> RootEnvironmentDetector::detect() {
     char ver[32] = {0};
     switch (env.provider) {
         case RootProvider::Magisk:
+#ifdef __ANDROID__
             ::property_get("ro.magisk.version", ver, "");
+#endif
             env.adbRootDir = "/data/adb/magisk";
             break;
         case RootProvider::KernelSU:
+#ifdef __ANDROID__
             ::property_get("ro.kernelsu.version", ver, "");
+#endif
             env.adbRootDir = "/data/adb/ksu";
             break;
         case RootProvider::APatch:
+#ifdef __ANDROID__
             ::property_get("ro.apatch.version", ver, "");
+#endif
             env.adbRootDir = "/data/adb/ap";
             break;
         case RootProvider::None:

@@ -118,9 +118,8 @@ void IpcServer::handleClient(int cfd, const PeerCredential& peer) {
         // 简化：MVP 跳过 magic/version 严格校验
         (void)magic; (void)version;
 
-        Handlers::Context ctx{peer, bus_, /* core */ nullptr};
-        // 注意：实际生产中 core 应该通过 IpcServer 注入，这里简化
-        // 完整实现见 daemon_core 注入
+        // Phase B：注入 DaemonCore 指针，让 handlers 调用真实方法
+        Handlers::Context ctx{peer, bus_, core_};
         auto respPayload = handlers.dispatch(ctx, seq, std::vector<uint8_t>(
             frame->begin() + dec.pos_, frame->end()));
 
