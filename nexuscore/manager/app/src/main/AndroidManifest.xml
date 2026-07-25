@@ -5,13 +5,8 @@
     <!-- 查询其它应用（SuperUser 授权列表需要） -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
-    <!-- 写入 Download 目录导出日志 -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
     <!-- 前台服务（未来扩展） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- 重启设备权限（通过 root shell 执行，声明用于权限说明 -->
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".NexusApp"
