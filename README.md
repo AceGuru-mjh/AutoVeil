@@ -9,6 +9,8 @@
   <img src="https://img.shields.io/github/license/AceGuru-mjh/AutoVeil?style=flat-square&color=blue" alt="license"/>
   <img src="https://img.shields.io/github/v/release/AceGuru-mjh/AutoVeil?style=flat-square&include_prereleases" alt="release"/>
   <img src="https://img.shields.io/github/last-commit/AceGuru-mjh/AutoVeil?style=flat-square&logo=git" alt="last-commit"/>
+  <img src="https://img.shields.io/github/downloads/AceGuru-mjh/AutoVeil/total?style=flat-square&color=blue&label=%E6%80%BB%E4%B8%8B%E8%BD%BD%E9%87%8F" alt="downloads"/>
+  <img src="https://img.shields.io/badge/Root-Magisk%20%2F%20KernelSU%20%2F%20APatch-00e5ff?style=flat-square&logo=linux&logoColor=white" alt="root-providers"/>
   <br/>
   <img src="https://img.shields.io/github/actions/workflow/status/AceGuru-mjh/AutoVeil/build-apk.yml?branch=main&style=flat-square&logo=githubactions&label=APK%20Build" alt="Build APK"/>
   <img src="https://img.shields.io/badge/Android-14%20%7C%2015%20%7C%2016-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android"/>
@@ -36,7 +38,19 @@
   <a href="./README_en.md">English</a> · 简体中文
 </p>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=18&pause=1200&color=00E5FF&center=true&vCenter=true&width=620&lines=User-space+Root+Framework;Four-Layer+Separation;Zero+Bootloop+Design;Android+14+%7E+16">
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&size=18&pause=1200&color=00E5FF&center=true&vCenter=true&width=620&lines=User-space+Root+Framework;Four-Layer+Separation;Zero+Bootloop+Design;Android+14+%7E+16" alt="Typing SVG"/>
+</picture>
+
 ---
+
+<p align="center">
+  <a href="https://github.com/AceGuru-mjh/AutoVeil/releases"><img src="https://img.shields.io/badge/⬇️-下载_Release-orange?style=for-the-badge&logo=github" alt="Releases"/></a>
+  <a href="#-开发与构建"><img src="https://img.shields.io/badge/⚙️-本地构建-228be6?style=for-the-badge&logo=gradle&logoColor=white" alt="Build"/></a>
+  <a href="#-开发规约"><img src="https://img.shields.io/badge/📄-开发规约-7f52ff?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Specs"/></a>
+  <a href="./CONTRIBUTING.md"><img src="https://img.shields.io/badge/🤝-参与贡献-3ddc84?style=for-the-badge&logo=githubactions&logoColor=white" alt="Contributing"/></a>
+</p>
 
 ## 📖 项目简介
 
@@ -72,6 +86,34 @@
 
 **启动时序**：`init → nexusd --daemon → RootEnvironmentDetector → SELinuxManager.patchSelfDomain → ModuleLoader.scanModules → FileSystemInterceptor.mountAll → IpcServer.listen → late_start 脚本 → Watchdog 主循环`
 
+<details>
+<summary>🔧 查看启动时序图（Mermaid）</summary>
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant init as init
+    participant d as nexusd
+    participant SE as SELinuxManager
+    participant ML as ModuleLoader
+    participant FS as FileSystemInterceptor
+    participant IPC as IpcServer
+    participant WD as Watchdog
+    init->>d: exec --daemon
+    d->>d: daemonize (双 fork) + PID file (O_CREAT|O_EXCL)
+    d->>SE: RootEnvironmentDetector → patchSelfDomain
+    Note over SE: 仅放宽 u:r:nexus_daemon:s0<br/>保留 Enforcing
+    d->>ML: scanModules (按 priority 排序)
+    d->>FS: mountAll (OverlayFS → Bind 降级 → 只读兜底)
+    Note over FS: 失败 3 次自动进入安全模式
+    d->>IPC: listen /dev/socket/nexusd.sock
+    Note over IPC: SO_PEERCRED + APK 签名指纹双校验
+    d->>d: late_start 脚本 (独立 Mount Namespace)
+    d->>WD: 进入主循环 (线程级保活)
+```
+
+</details>
+
 ---
 
 ## ✨ 核心特性
@@ -102,6 +144,25 @@
 - 脚本阶段：`post-fs-data.sh` / `service.sh` / `customize.sh` / `uninstall.sh` / `verify.sh`
 - 环境变量注入：`NEXUS_MODULE_PATH`、`NEXUS_BOOT_STAGE`、`NEXUS_ROOT_PROVIDER` 等
 - 示例模块 `nexus_prop_editor`：安全修改 `build.prop` 的 `ro.debuggable` / `ro.secure`
+
+---
+
+## 📊 架构对比
+
+> 诚实对比，帮助判断 NexusCore 的定位与成熟度。本项目处于 **MVP / Phase 1**，不与成熟方案争短长，差异体现在架构取舍。
+
+| 维度 | NexusCore | Magisk | KernelSU |
+|---|---|---|---|
+| Root 实现层 | 用户态 syscall | 用户态 + daemon | 内核态 |
+| 内核模块 (`.ko`) | ❌ 严禁 | ❌ | ✅ |
+| SELinux 处理 | 仅修补自身域，保留 Enforcing | magiskpolicy | 内核态 bypass |
+| 模块清单 | 声明式 DMM（capabilities/intents） | `module.prop` | `module.prop` |
+| 客户端↔守护进程 | UDS + Protobuf + `SO_PEERCRED` | binder/socket | binder |
+| FS 拦截降级 | OverlayFS → Bind → 只读 | Magic Mount | OverlayFS |
+| 防 Bootloop | BootCounter + 安全模式 + 挂载快照回滚 | magiskbackup | 内核级 |
+| Root 来源依赖 | 基于 Magisk / KSU / APatch 落地 | 自身 | 自身 |
+| 目标 Android | 14 / 15 / 16 (API 34+) | 广泛 | 广泛 |
+| 成熟度 | 🚧 MVP | ✅ 成熟 | ✅ 成熟 |
 
 ---
 
@@ -230,6 +291,16 @@ adb shell "/data/local/tmp/nexusd --foreground"
 - 📄 [Spec 02 — NexusManager](./nexuscore/specs/spec-02-manager.md) — IPC 客户端、Repository、ViewModel、Compose UI
 - 📄 [Spec 03 — Module SDK](./nexuscore/specs/spec-03-module-sdk.md) — DMM 清单、capabilities、脚本运行环境、示例模块
 - 📘 [模块开发者指南](./nexuscore/sdk/docs/developer-guide.md) — 第三方模块开发从 0 到 1
+
+---
+
+## 👥 贡献者
+
+<a href="https://github.com/AceGuru-mjh/AutoVeil/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=AceGuru-mjh/AutoVeil&max=24&columns=12" alt="Contributors"/>
+</a>
+
+感谢所有为本项目提交 PR 与 Issue 的贡献者。欢迎你成为下一个 ✨
 
 ---
 

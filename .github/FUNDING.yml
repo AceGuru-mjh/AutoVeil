@@ -1,0 +1,6 @@
+# 赞助配置 —— GitHub 在仓库页面显示 "Sponsor" 按钮
+# 文档：https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+# 如需启用爱发电 / 支付宝等自定义渠道，取消注释 custom 行并填写链接
+
+github: AceGuru-mjh
+# custom: ['https://afdian.net/your-id']

@@ -1,0 +1,14 @@
+# CODEOWNERS —— 自动为 PR 分配 Reviewer
+# 文档：https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# 每条匹配一个路径模式 + 一个或多个 @用户名 / @团队
+
+# 默认：所有变更都请求 owner review
+*                           @AceGuru-mjh
+
+# 按子系统细分（合并入 main 前需对应维护者 approve）
+/nexuscore/daemon/          @AceGuru-mjh
+/nexuscore/manager/         @AceGuru-mjh
+/nexuscore/modules/         @AceGuru-mjh
+/nexuscore/sdk/             @AceGuru-mjh
+/nexuscore/specs/           @AceGuru-mjh
+/.github/                   @AceGuru-mjh

@@ -1,0 +1,70 @@
+# CodeQL —— 代码安全与质量扫描
+# 文档：https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning
+#
+# 仅扫描 Java/Kotlin（NexusManager）。Daemon 源码尚未落地，待 C++ 代码入库后可加 languages: cpp。
+# 触发：manager 代码变更的 PR / push，以及每周一例行全量扫描。
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main, 'feat/**', 'trae/**']
+    paths:
+      - 'nexuscore/manager/**'
+      - '.github/workflows/codeql.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'nexuscore/manager/**'
+      - '.github/workflows/codeql.yml'
+  schedule:
+    - cron: '0 5 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (java-kotlin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-35
+            build-tools;35.0.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java-kotlin
+          # 只跑安全相关查询套件，避免噪音
+          queries: security-extended
+
+      - name: Build NexusManager
+        working-directory: nexuscore/manager
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:assembleDebug --no-daemon -x lint -x test
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:java-kotlin"
