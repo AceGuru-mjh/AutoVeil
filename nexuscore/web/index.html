@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NexusCore — Android Root Framework · MVP Knowledge Atlas</title>
+<meta name="description" content="NexusCore 四层分离架构的完整知识图谱、开发指南与演进路线图。">
+<style>
+  /* ============ Reset & Tokens ============ */
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0a0e13;
+    --bg-grad:radial-gradient(1200px 600px at 80% -10%, rgba(0,229,255,.08), transparent 60%),
+              radial-gradient(900px 500px at 0% 100%, rgba(0,229,255,.05), transparent 55%),
+              #0a0e13;
+    --surface:#11161c;
+    --surface-2:#161c24;
+    --surface-3:#1c242e;
+    --border:#1f2832;
+    --border-strong:#2a3644;
+    --text:#e0e6ed;
+    --text-dim:#8b96a5;
+    --text-mute:#5a6573;
+    --accent:#00e5ff;
+    --accent-2:#18b4c8;
+    --accent-dim:rgba(0,229,255,.12);
+    --accent-glow:rgba(0,229,255,.35);
+    --success:#4ade80;
+    --warn:#fbbf24;
+    --danger:#f87171;
+    --phase-1:#4ade80;
+    --phase-2:#60a5fa;
+    --phase-3:#a78bfa;
+    --phase-4:#fbbf24;
+    --phase-5:#f87171;
+    --mono:"JetBrains Mono","Fira Code","SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --maxw:1240px;
+  }
+  html{scroll-behavior:smooth;font-size:16px}
+  body{
+    font-family:var(--sans);
+    background:var(--bg-grad);
+    background-attachment:fixed;
+    color:var(--text);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:inherit;text-decoration:none}
+  ::selection{background:var(--accent);color:#000}
+
+  /* ============ Layout ============ */
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  section{padding:96px 0;border-top:1px solid var(--border)}
+  section:first-of-type{border-top:none}
+
+  /* ============ Nav ============ */
+  nav{
+    position:sticky;top:0;z-index:50;
+    backdrop-filter:blur(12px);
+    background:rgba(10,14,19,.72);
+    border-bottom:1px solid var(--border);
+  }
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.02em}
+  .brand .dot{width:10px;height:10px;border-radius:2px;background:var(--accent);box-shadow:0 0 12px var(--accent-glow)}
+  .brand .name{font-family:var(--mono);font-size:15px}
+  .nav-links{display:flex;gap:24px;font-size:13px;color:var(--text-dim)}
+  .nav-links a{transition:color .2s}
+  .nav-links a:hover{color:var(--accent)}
+  .nav-status{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--success)}
+  .nav-status .pulse{width:6px;height:6px;border-radius:50%;background:var(--success);box-shadow:0 0 8px var(--success);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  @media(max-width:760px){.nav-links{display:none}}
+
+  /* ============ Hero ============ */
+  .hero{padding:120px 0 80px;position:relative}
+  .hero::before{
+    content:"";position:absolute;inset:0;
+    background-image:linear-gradient(rgba(0,229,255,.04) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(0,229,255,.04) 1px,transparent 1px);
+    background-size:48px 48px;
+    mask:radial-gradient(ellipse 800px 400px at 50% 30%, #000 30%, transparent 75%);
+    pointer-events:none;
+  }
+  .hero .wrap{position:relative}
+  .hero-badge{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:6px 12px;border:1px solid var(--border-strong);border-radius:999px;
+    font-family:var(--mono);font-size:12px;color:var(--accent);
+    background:var(--accent-dim);
+  }
+  .hero h1{
+    font-size:clamp(48px,8vw,104px);font-weight:800;letter-spacing:-.04em;
+    line-height:.95;margin:24px 0 16px;
+  }
+  .hero h1 .glow{color:var(--accent);text-shadow:0 0 40px var(--accent-glow)}
+  .hero .tagline{
+    font-size:clamp(18px,2.4vw,24px);color:var(--text-dim);max-width:680px;
+    margin-bottom:32px;
+  }
+  .hero-meta{display:flex;gap:32px;flex-wrap:wrap;font-family:var(--mono);font-size:13px;color:var(--text-mute)}
+  .hero-meta b{color:var(--text);font-weight:600}
+  .hero-cta{display:flex;gap:14px;margin-top:40px;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:12px 22px;border-radius:8px;font-weight:600;font-size:14px;
+    transition:all .2s;cursor:pointer;border:1px solid transparent;
+  }
+  .btn-primary{background:var(--accent);color:#000}
+  .btn-primary:hover{background:#fff;box-shadow:0 0 24px var(--accent-glow);transform:translateY(-1px)}
+  .btn-ghost{border-color:var(--border-strong);color:var(--text)}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* ============ Section header ============ */
+  .sec-head{margin-bottom:48px}
+  .sec-head .kicker{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.16em;text-transform:uppercase;margin-bottom:12px}
+  .sec-head h2{font-size:clamp(32px,4.5vw,48px);font-weight:700;letter-spacing:-.02em;line-height:1.1}
+  .sec-head p{color:var(--text-dim);margin-top:12px;max-width:680px;font-size:16px}
+
+  /* ============ Knowledge Graph ============ */
+  .graph-stage{
+    position:relative;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:16px;
+    overflow:hidden;
+  }
+  .graph-stage::before{
+    content:"";position:absolute;inset:0;
+    background-image:linear-gradient(rgba(0,229,255,.03) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(0,229,255,.03) 1px,transparent 1px);
+    background-size:24px 24px;pointer-events:none;
+  }
+  .graph-toolbar{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:14px 20px;border-bottom:1px solid var(--border);
+    font-family:var(--mono);font-size:12px;color:var(--text-dim);
+    position:relative;z-index:2;background:var(--surface);
+  }
+  .graph-toolbar .legend{display:flex;gap:16px;flex-wrap:wrap}
+  .legend-item{display:flex;align-items:center;gap:6px}
+  .legend-swatch{width:10px;height:10px;border-radius:2px}
+  .graph-svg-wrap{position:relative;overflow-x:auto}
+  .graph-svg{display:block;min-width:960px;width:100%;height:auto}
+  .graph-detail{
+    border-top:1px solid var(--border);padding:24px;
+    background:var(--surface-2);min-height:120px;
+    position:relative;z-index:2;
+  }
+  .graph-detail .detail-empty{color:var(--text-mute);font-family:var(--mono);font-size:13px}
+  .graph-detail h4{font-size:18px;margin-bottom:4px;display:flex;align-items:center;gap:10px}
+  .graph-detail h4 .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:4px;background:var(--accent-dim);color:var(--accent)}
+  .graph-detail .detail-body{color:var(--text-dim);font-size:14px;margin-top:8px}
+  .graph-detail .detail-contract{margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--accent-2);background:#0a0e13;border:1px solid var(--border);border-radius:6px;padding:10px 14px;white-space:pre-wrap}
+
+  /* SVG node styles */
+  .gnode{cursor:pointer;transition:opacity .2s}
+  .gnode rect{transition:all .2s}
+  .gnode:hover rect{stroke:var(--accent);stroke-width:1.5}
+  .gnode.active rect{stroke:var(--accent);stroke-width:2;filter:drop-shadow(0 0 8px var(--accent-glow))}
+  .gnode text{font-family:var(--mono);font-size:11px;fill:var(--text);pointer-events:none}
+  .gnode text.sub{fill:var(--text-dim);font-size:9px}
+  .gedge{stroke:var(--border-strong);stroke-width:1;fill:none;transition:stroke .2s}
+  .gedge.active{stroke:var(--accent);stroke-width:1.5}
+  .gedge.dashed{stroke-dasharray:4 3}
+  .glabel{font-family:var(--mono);font-size:10px;fill:var(--text-mute);letter-spacing:.1em;text-transform:uppercase}
+  .gband{fill:var(--surface-2);opacity:.4}
+
+  /* ============ Layer cards ============ */
+  .layer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+  .layer-card{
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;
+    padding:24px;transition:all .25s;position:relative;overflow:hidden;
+  }
+  .layer-card::before{
+    content:"";position:absolute;top:0;left:0;right:0;height:2px;
+    background:linear-gradient(90deg,transparent,var(--accent),transparent);
+    opacity:0;transition:opacity .3s;
+  }
+  .layer-card:hover{border-color:var(--border-strong);transform:translateY(-2px)}
+  .layer-card:hover::before{opacity:1}
+  .layer-card .num{font-family:var(--mono);font-size:11px;color:var(--text-mute);letter-spacing:.1em}
+  .layer-card h3{font-size:20px;margin:8px 0 4px;font-weight:700}
+  .layer-card .role{font-family:var(--mono);font-size:12px;color:var(--accent);margin-bottom:14px}
+  .layer-card .desc{color:var(--text-dim);font-size:14px;margin-bottom:16px}
+  .layer-card ul{list-style:none;font-size:13px}
+  .layer-card li{padding:4px 0;color:var(--text-dim);display:flex;gap:8px}
+  .layer-card li::before{content:"▸";color:var(--accent);font-family:var(--mono)}
+  .layer-card li code{font-family:var(--mono);font-size:12px;color:var(--text);background:var(--surface-3);padding:1px 6px;border-radius:3px}
+
+  /* ============ Dev guide ============ */
+  .dev-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:32px}
+  @media(max-width:880px){.dev-grid{grid-template-columns:1fr}}
+  .code-block{
+    background:#070a0e;border:1px solid var(--border);border-radius:10px;
+    overflow:hidden;
+  }
+  .code-head{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:10px 16px;border-bottom:1px solid var(--border);
+    font-family:var(--mono);font-size:12px;color:var(--text-dim);
+  }
+  .code-head .dots{display:flex;gap:6px}
+  .code-head .dots span{width:10px;height:10px;border-radius:50%;background:var(--surface-3)}
+  .code-body{padding:18px 20px;font-family:var(--mono);font-size:13px;line-height:1.7;overflow-x:auto}
+  .code-body .cm{color:var(--text-mute)}
+  .code-body .kw{color:#c792ea}
+  .code-body .st{color:#c3e88d}
+  .code-body .fn{color:var(--accent)}
+  .code-body .ty{color:#ffcb6b}
+  .dev-list{display:flex;flex-direction:column;gap:14px}
+  .dev-step{display:flex;gap:14px;padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+  .dev-step .n{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:14px;min-width:24px}
+  .dev-step .t{font-size:14px}
+  .dev-step .t b{color:var(--text)}
+  .dev-step .t span{color:var(--text-dim);display:block;font-size:12px;margin-top:2px;font-family:var(--mono)}
+
+  /* ============ Roadmap ============ */
+  .roadmap{position:relative;padding-left:32px}
+  .roadmap::before{content:"";position:absolute;left:7px;top:8px;bottom:8px;width:2px;background:var(--border)}
+  .phase{position:relative;padding:0 0 36px 28px}
+  .phase::before{
+    content:"";position:absolute;left:-32px;top:4px;width:16px;height:16px;border-radius:50%;
+    background:var(--bg);border:2px solid var(--accent);
+  }
+  .phase.done::before{background:var(--accent)}
+  .phase .phase-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .phase .phase-tag{font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:4px;font-weight:600}
+  .phase[data-phase="1"] .phase-tag{background:rgba(74,222,128,.15);color:var(--phase-1)}
+  .phase[data-phase="1"]::before{border-color:var(--phase-1)}
+  .phase[data-phase="1"].done::before{background:var(--phase-1)}
+  .phase[data-phase="2"] .phase-tag{background:rgba(96,165,250,.15);color:var(--phase-2)}
+  .phase[data-phase="2"]::before{border-color:var(--phase-2)}
+  .phase[data-phase="3"] .phase-tag{background:rgba(167,139,250,.15);color:var(--phase-3)}
+  .phase[data-phase="3"]::before{border-color:var(--phase-3)}
+  .phase[data-phase="4"] .phase-tag{background:rgba(251,191,36,.15);color:var(--phase-4)}
+  .phase[data-phase="4"]::before{border-color:var(--phase-4)}
+  .phase[data-phase="5"] .phase-tag{background:rgba(248,113,113,.15);color:var(--phase-5)}
+  .phase[data-phase="5"]::before{border-color:var(--phase-5)}
+  .phase h3{font-size:20px;font-weight:700}
+  .phase .trigger{font-family:var(--mono);font-size:12px;color:var(--warn);margin:8px 0;background:rgba(251,191,36,.08);border-left:2px solid var(--warn);padding:8px 12px;border-radius:0 6px 6px 0}
+  .phase .trigger b{color:var(--warn)}
+  .phase p{color:var(--text-dim);font-size:14px}
+  .phase .status{font-family:var(--mono);font-size:11px;color:var(--text-mute);margin-top:8px}
+  .phase .status.done{color:var(--success)}
+  .phase .status.next{color:var(--accent)}
+  .phase .status.risk{color:var(--danger)}
+
+  /* ============ Optimizations ============ */
+  .opt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+  .opt-card{
+    background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--success);
+    border-radius:8px;padding:18px;
+  }
+  .opt-card.warn{border-left-color:var(--warn)}
+  .opt-card.info{border-left-color:var(--accent)}
+  .opt-card .opt-title{font-weight:600;font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+  .opt-card .opt-title .badge{font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;background:var(--surface-3);color:var(--text-dim)}
+  .opt-card .opt-body{font-size:13px;color:var(--text-dim)}
+  .opt-card .opt-where{font-family:var(--mono);font-size:11px;color:var(--text-mute);margin-top:8px}
+
+  /* ============ Footer ============ */
+  footer{padding:48px 0 32px;border-top:1px solid var(--border);color:var(--text-mute);font-size:13px}
+  footer .wrap{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap}
+  footer .specs{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:12px}
+  footer .specs a{color:var(--text-dim);transition:color .2s}
+  footer .specs a:hover{color:var(--accent)}
+
+  /* ============ Reveal animation ============ */
+  .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+  .reveal.d1{transition-delay:.08s}
+  .reveal.d2{transition-delay:.16s}
+  .reveal.d3{transition-delay:.24s}
+
+  @media(prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .reveal{opacity:1;transform:none}
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="name">NexusCore</span>
+    </div>
+    <div class="nav-links">
+      <a href="#architecture">架构图谱</a>
+      <a href="#layers">四层架构</a>
+      <a href="#dev">开发指南</a>
+      <a href="#roadmap">演进路线</a>
+      <a href="#optimizations">优化点</a>
+    </div>
+    <div class="nav-status">
+      <span class="pulse"></span>
+      <span>MVP · v1.0</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="wrap">
+    <span class="hero-badge reveal">● Android 14 / 15 / 16 · 用户态 Root 框架 · 不写内核</span>
+    <h1 class="reveal d1">Nexus<span class="glow">Core</span></h1>
+    <p class="tagline reveal d2">
+      严格四层分离架构的系统级修改平台。底层坚如磐石，上层灵活可塑。
+      以声明式模块清单与意图总线为基底，为未来 Agent 生态预留插槽。
+    </p>
+    <div class="hero-meta reveal d3">
+      <div><b>4</b> 层架构</div>
+      <div><b>C++17</b> Daemon</div>
+      <div><b>Kotlin/Compose</b> Manager</div>
+      <div><b>Protobuf</b> IPC</div>
+      <div><b>UDS</b> + SO_PEERCRED</div>
+    </div>
+    <div class="hero-cta reveal d3">
+      <a href="#architecture" class="btn btn-primary">查看架构图谱 →</a>
+      <a href="#dev" class="btn btn-ghost">开发指南</a>
+    </div>
+  </div>
+</header>
+
+<!-- ============ KNOWLEDGE GRAPH ============ -->
+<section id="architecture">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">/ Knowledge Atlas</div>
+      <h2>核心架构知识图谱</h2>
+      <p>四层分离，自下而上：Root 守护核心 → 抽象调度 → 客户端管理 → 模块生态。点击任意节点查看其职责与核心契约。</p>
+    </div>
+
+    <div class="graph-stage reveal d1">
+      <div class="graph-toolbar">
+        <div class="legend">
+          <div class="legend-item"><span class="legend-swatch" style="background:#00e5ff"></span>Daemon Core (Layer 1)</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:#a78bfa"></span>Abstraction (Layer 2)</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:#60a5fa"></span>Manager (Layer 3)</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:#4ade80"></span>Modules (Layer 4)</div>
+          <div class="legend-item"><span class="legend-swatch" style="background:#fbbf24"></span>整改落点</div>
+        </div>
+        <div>悬停高亮 · 点击查看详情</div>
+      </div>
+
+      <div class="graph-svg-wrap">
+        <svg class="graph-svg" viewBox="0 0 1200 760" xmlns="http://www.w3.org/2000/svg">
+          <!-- Layer bands -->
+          <rect class="gband" x="0" y="20" width="1200" height="140" />
+          <text class="glabel" x="20" y="40">Layer 4 · Module Ecosystem</text>
+          <rect class="gband" x="0" y="200" width="1200" height="140" />
+          <text class="glabel" x="20" y="220">Layer 3 · NexusManager (Kotlin/Compose)</text>
+          <rect class="gband" x="0" y="380" width="1200" height="140" />
+          <text class="glabel" x="20" y="400">Layer 2 · Abstraction &amp; Orchestration (C++/Rust)</text>
+          <rect class="gband" x="0" y="560" width="1200" height="180" />
+          <text class="glabel" x="20" y="580">Layer 1 · Root Daemon Core (nexusd)</text>
+
+          <!-- Edges (drawn first, behind nodes) -->
+          <!-- Modules -> ModuleLoader -->
+          <path class="gedge" d="M 250,170 C 250,260 360,320 360,380" data-from="m-nexusprop" data-to="a-moduleloader"/>
+          <path class="gedge dashed" d="M 520,170 C 520,260 410,320 410,380" data-from="m-custom" data-to="a-moduleloader"/>
+          <path class="gedge dashed" d="M 780,170 C 780,260 460,320 460,380" data-from="m-manifest" data-to="a-moduleloader"/>
+
+          <!-- Manager IPC -> Daemon IpcServer (the critical channel) -->
+          <path class="gedge" d="M 600,340 C 600,460 920,500 920,560" data-from="c-ipc" data-to="d-ipc" stroke-width="2"/>
+
+          <!-- Manager pages -> IPC client -->
+          <path class="gedge" d="M 250,340 C 250,330 480,330 480,300" data-from="c-dash" data-to="c-ipc"/>
+          <path class="gedge" d="M 460,340 C 460,330 510,330 510,300" data-from="c-mods" data-to="c-ipc"/>
+          <path class="gedge" d="M 670,340 C 670,330 540,330 540,300" data-from="c-logs" data-to="c-ipc"/>
+
+          <!-- Abstraction inter-connections -->
+          <path class="gedge" d="M 360,440 C 360,460 200,500 200,560" data-from="a-moduleloader" data-to="d-fs"/>
+          <path class="gedge" d="M 410,460 C 410,490 240,520 240,560" data-from="a-shell" data-to="d-fs"/>
+          <path class="gedge" d="M 460,440 C 460,470 720,510 720,560" data-from="a-prociso" data-to="d-selinux"/>
+          <path class="gedge" d="M 560,440 C 560,470 760,510 760,560" data-from="a-eventbus" data-to="d-watchdog"/>
+
+          <!-- Daemon core inter-connections -->
+          <path class="gedge" d="M 920,620 C 920,640 200,640 200,620" data-from="d-ipc" data-to="d-fs" dashed=""/>
+          <path class="gedge" d="M 120,620 C 120,640 720,640 720,620" data-from="d-rootenv" data-to="d-selinux"/>
+
+          <!-- ============ Layer 4: Modules ============ -->
+          <g class="gnode" data-id="m-nexusprop" data-layer="4">
+            <rect x="160" y="70" width="180" height="80" rx="8" fill="#11161c" stroke="#4ade80"/>
+            <text x="250" y="100" text-anchor="middle">NexusProp Editor</text>
+            <text class="sub" x="250" y="118" text-anchor="middle">示例模块 · build.prop</text>
+            <text class="sub" x="250" y="134" text-anchor="middle">priority=100</text>
+          </g>
+          <g class="gnode" data-id="m-custom" data-layer="4">
+            <rect x="430" y="70" width="180" height="80" rx="8" fill="#11161c" stroke="#4ade80"/>
+            <text x="520" y="100" text-anchor="middle">Custom Module</text>
+            <text class="sub" x="520" y="118" text-anchor="middle">第三方模块</text>
+            <text class="sub" x="520" y="134" text-anchor="middle">system/ + .sh</text>
+          </g>
+          <g class="gnode" data-id="m-manifest" data-layer="4">
+            <rect x="690" y="70" width="180" height="80" rx="8" fill="#11161c" stroke="#fbbf24"/>
+            <text x="780" y="100" text-anchor="middle">manifest.json (DMM)</text>
+            <text class="sub" x="780" y="118" text-anchor="middle">capabilities</text>
+            <text class="sub" x="780" y="134" text-anchor="middle">intents · priority</text>
+          </g>
+
+          <!-- ============ Layer 3: Manager ============ -->
+          <g class="gnode" data-id="c-dash" data-layer="3">
+            <rect x="160" y="250" width="180" height="80" rx="8" fill="#11161c" stroke="#60a5fa"/>
+            <text x="250" y="280" text-anchor="middle">Dashboard</text>
+            <text class="sub" x="250" y="298" text-anchor="middle">Root/SELinux 状态</text>
+            <text class="sub" x="250" y="314" text-anchor="middle">重启 / 安全模式</text>
+          </g>
+          <g class="gnode" data-id="c-mods" data-layer="3">
+            <rect x="370" y="250" width="180" height="80" rx="8" fill="#11161c" stroke="#60a5fa"/>
+            <text x="460" y="280" text-anchor="middle">Modules</text>
+            <text class="sub" x="460" y="298" text-anchor="middle">列表 / 开关 / 安装</text>
+            <text class="sub" x="460" y="314" text-anchor="middle">ZIP 本地安装</text>
+          </g>
+          <g class="gnode" data-id="c-logs" data-layer="3">
+            <rect x="580" y="250" width="180" height="80" rx="8" fill="#11161c" stroke="#60a5fa"/>
+            <text x="670" y="280" text-anchor="middle">Logs</text>
+            <text class="sub" x="670" y="298" text-anchor="middle">实时日志流</text>
+            <text class="sub" x="670" y="314" text-anchor="middle">SharedFlow 订阅</text>
+          </g>
+          <g class="gnode" data-id="c-ipc" data-layer="3">
+            <rect x="510" y="240" width="180" height="100" rx="8" fill="#161c24" stroke="#60a5fa" stroke-width="2"/>
+            <text x="600" y="268" text-anchor="middle">NexusIpcClient</text>
+            <text class="sub" x="600" y="286" text-anchor="middle">UDS · Protobuf</text>
+            <text class="sub" x="600" y="302" text-anchor="middle">断线重连 · 连接池</text>
+            <text class="sub" x="600" y="318" text-anchor="middle" fill="#fbbf24">StateFlow · Dispatchers.IO</text>
+          </g>
+
+          <!-- ============ Layer 2: Abstraction ============ -->
+          <g class="gnode" data-id="a-moduleloader" data-layer="2">
+            <rect x="270" y="430" width="180" height="80" rx="8" fill="#11161c" stroke="#a78bfa"/>
+            <text x="360" y="460" text-anchor="middle">ModuleLoader</text>
+            <text class="sub" x="360" y="478" text-anchor="middle">parseManifest · load</text>
+            <text class="sub" x="360" y="494" text-anchor="middle" fill="#fbbf24">priority 排序</text>
+          </g>
+          <g class="gnode" data-id="a-shell" data-layer="2">
+            <rect x="370" y="450" width="160" height="70" rx="8" fill="#11161c" stroke="#a78bfa"/>
+            <text x="450" y="478" text-anchor="middle">ShellExecutor</text>
+            <text class="sub" x="450" y="496" text-anchor="middle">fork+execve</text>
+            <text class="sub" x="450" y="510" text-anchor="middle">post-fs-data / late</text>
+          </g>
+          <g class="gnode" data-id="a-prociso" data-layer="2">
+            <rect x="560" y="430" width="180" height="80" rx="8" fill="#11161c" stroke="#a78bfa"/>
+            <text x="650" y="460" text-anchor="middle">ProcessIsolator</text>
+            <text class="sub" x="650" y="478" text-anchor="middle">createNamespace</text>
+            <text class="sub" x="650" y="494" text-anchor="middle">CLONE_NEWNS</text>
+          </g>
+          <g class="gnode" data-id="a-eventbus" data-layer="2">
+            <rect x="780" y="430" width="180" height="80" rx="8" fill="#11161c" stroke="#a78bfa"/>
+            <text x="870" y="460" text-anchor="middle">EventBus</text>
+            <text class="sub" x="870" y="478" text-anchor="middle">publish / subscribe</text>
+            <text class="sub" x="870" y="494" text-anchor="middle">in-memory (MVP)</text>
+          </g>
+
+          <!-- ============ Layer 1: Daemon Core ============ -->
+          <g class="gnode" data-id="d-rootenv" data-layer="1">
+            <rect x="40" y="610" width="160" height="80" rx="8" fill="#11161c" stroke="#fbbf24"/>
+            <text x="120" y="640" text-anchor="middle">RootEnvDetect</text>
+            <text class="sub" x="120" y="658" text-anchor="middle">Magisk/KSU/APatch</text>
+            <text class="sub" x="120" y="674" text-anchor="middle" fill="#fbbf24">整改#2 启动校验</text>
+          </g>
+          <g class="gnode" data-id="d-watchdog" data-layer="1">
+            <rect x="220" y="610" width="160" height="80" rx="8" fill="#11161c" stroke="#00e5ff"/>
+            <text x="300" y="640" text-anchor="middle">Watchdog</text>
+            <text class="sub" x="300" y="658" text-anchor="middle">线程级重启</text>
+            <text class="sub" x="300" y="674" text-anchor="middle">PID 文件</text>
+          </g>
+          <g class="gnode" data-id="d-fs" data-layer="1">
+            <rect x="400" y="610" width="180" height="80" rx="8" fill="#11161c" stroke="#fbbf24"/>
+            <text x="490" y="640" text-anchor="middle">FileSystemInterceptor</text>
+            <text class="sub" x="490" y="658" text-anchor="middle">OverlayFS → Bind 降级</text>
+            <text class="sub" x="490" y="674" text-anchor="middle" fill="#fbbf24">整改#1 FUSE 预留</text>
+          </g>
+          <g class="gnode" data-id="d-selinux" data-layer="1">
+            <rect x="600" y="610" width="180" height="80" rx="8" fill="#11161c" stroke="#00e5ff"/>
+            <text x="690" y="640" text-anchor="middle">SELinuxManager</text>
+            <text class="sub" x="690" y="658" text-anchor="middle">libsepol 内存修补</text>
+            <text class="sub" x="690" y="674" text-anchor="middle">仅 nexus_daemon 域</text>
+          </g>
+          <g class="gnode" data-id="d-ipc" data-layer="1">
+            <rect x="800" y="610" width="200" height="80" rx="8" fill="#161c24" stroke="#fbbf24" stroke-width="2"/>
+            <text x="900" y="640" text-anchor="middle">IpcServer (UDS)</text>
+            <text class="sub" x="900" y="658" text-anchor="middle">SO_PEERCRED 凭证校验</text>
+            <text class="sub" x="900" y="674" text-anchor="middle" fill="#fbbf24">整改#3 签名白名单</text>
+          </g>
+          <g class="gnode" data-id="d-logger" data-layer="1">
+            <rect x="1020" y="610" width="160" height="80" rx="8" fill="#11161c" stroke="#00e5ff"/>
+            <text x="1100" y="640" text-anchor="middle">Logger</text>
+            <text class="sub" x="1100" y="658" text-anchor="middle">ring buffer + 文件</text>
+            <text class="sub" x="1100" y="674" text-anchor="middle">512K 滚动 ×3</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="graph-detail" id="graphDetail">
+        <div class="detail-empty">点击上方任意节点查看职责、核心契约与所在 Spec 章节。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LAYER DEEP DIVE ============ -->
+<section id="layers">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">/ Four-Layer Architecture</div>
+      <h2>四层分离详解</h2>
+      <p>底层稳定与上层灵活的严格隔离。每层有且仅有一个职责，跨层通信只通过定义良好的接口。</p>
+    </div>
+    <div class="layer-grid">
+      <div class="layer-card reveal d1">
+        <div class="num">LAYER 01</div>
+        <h3>Root 守护核心层</h3>
+        <div class="role">NexusDaemon · C++17 / Rust</div>
+        <div class="desc">系统的绝对控制中枢。随 init 启动，不被系统杀死。</div>
+        <ul>
+          <li><code>Watchdog</code> 线程级重启 + PID 文件</li>
+          <li><code>SELinuxManager</code> 仅修补自身域</li>
+          <li><code>FileSystemInterceptor</code> OverlayFS / Bind 降级</li>
+          <li><code>IpcServer</code> UDS + SO_PEERCRED</li>
+          <li><code>RootEnvDetect</code> Magisk/KSU/APatch 适配</li>
+        </ul>
+      </div>
+      <div class="layer-card reveal d2">
+        <div class="num">LAYER 02</div>
+        <h3>抽象与调度层</h3>
+        <div class="role">Abstraction &amp; Orchestration</div>
+        <div class="desc">连接 Daemon 与 UI 的桥梁。MVP 解析清单、执行脚本，预留事件总线。</div>
+        <ul>
+          <li><code>IModuleLoader</code> priority 排序挂载</li>
+          <li><code>ShellExecutor</code> 独立 Mount NS 执行</li>
+          <li><code>IProcessIsolator</code> CLONE_NEWNS 隔离</li>
+          <li><code>IEventBus</code> in-memory Pub/Sub</li>
+          <li>所有接口为纯虚类 / Trait</li>
+        </ul>
+      </div>
+      <div class="layer-card reveal d3">
+        <div class="num">LAYER 03</div>
+        <h3>客户端与管理层</h3>
+        <div class="role">NexusManager · Kotlin / Compose</div>
+        <div class="desc">用户交互、IPC 通信、状态可视化。绝不直接执行 Root 命令。</div>
+        <ul>
+          <li><code>NexusIpcClient</code> 断线重连 + 连接池</li>
+          <li>Dashboard / Modules / Logs 三页</li>
+          <li>MVVM + StateFlow</li>
+          <li>所有 IPC 走 Dispatchers.IO</li>
+          <li>ZIP 安装通过 FileBridge 桥接</li>
+        </ul>
+      </div>
+      <div class="layer-card reveal d3">
+        <div class="num">LAYER 04</div>
+        <h3>模块与插件生态</h3>
+        <div class="role">Module Ecosystem · DMM</div>
+        <div class="desc">声明式模块清单替代 module.prop，为 Agent 化预留插槽。</div>
+        <ul>
+          <li><code>manifest.json</code> 元数据 + 能力 + 意图</li>
+          <li><code>capabilities</code> 最小权限白名单</li>
+          <li><code>intents</code> 事件订阅声明</li>
+          <li><code>priority</code> 冲突排序字段</li>
+          <li>未声明能力一律 CAPABILITY_DENIED</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DEV GUIDE ============ -->
+<section id="dev">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">/ Developer Guide</div>
+      <h2>开发指南速览</h2>
+      <p>三步构建你的第一个 NexusCore 模块。完整规范见 spec-03 与 SDK 文档。</p>
+    </div>
+    <div class="dev-grid">
+      <div class="code-block reveal d1">
+        <div class="code-head">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <div>my_module/manifest.json</div>
+        </div>
+        <pre class="code-body"><span class="cm">// 声明式模块清单 (DMM)</span>
+{
+  <span class="st">"id"</span>: <span class="st">"my_module"</span>,
+  <span class="st">"name"</span>: <span class="st">"My First Module"</span>,
+  <span class="st">"version"</span>: <span class="st">"0.1.0"</span>,
+  <span class="st">"author"</span>: <span class="st">"you"</span>,
+  <span class="st">"min_nexus_version"</span>: <span class="st">"1.0"</span>,
+  <span class="st">"priority"</span>: <span class="ty">0</span>,
+  <span class="st">"capabilities"</span>: [
+    <span class="st">"EXECUTE_SHELL"</span>,
+    <span class="st">"MOUNT_FILESYSTEM"</span>
+  ],
+  <span class="st">"intents"</span>: [
+    { <span class="st">"action"</span>: <span class="st">"SYSTEM_BOOT_COMPLETED"</span> }
+  ]
+}</pre>
+      </div>
+      <div class="dev-list reveal d2">
+        <div class="dev-step">
+          <div class="n">01</div>
+          <div class="t"><b>创建模块骨架</b>
+            <span>mkdir -p my_module/system</span>
+          </div>
+        </div>
+        <div class="dev-step">
+          <div class="n">02</div>
+          <div class="t"><b>编写 manifest.json + 脚本</b>
+            <span>声明 capabilities，未声明的能力会被拒绝</span>
+          </div>
+        </div>
+        <div class="dev-step">
+          <div class="n">03</div>
+          <div class="t"><b>打包为 ZIP</b>
+            <span>zip -r9 ../my_module.zip .</span>
+          </div>
+        </div>
+        <div class="dev-step">
+          <div class="n">04</div>
+          <div class="t"><b>Manager 安装 + 重启</b>
+            <span>从本地 ZIP 安装 → 重启生效</span>
+          </div>
+        </div>
+        <div class="dev-step">
+          <div class="n">05</div>
+          <div class="t"><b>验证与调试</b>
+            <span>adb shell cat /data/adb/nexuscore/logs/&lt;id&gt;.log</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ROADMAP ============ -->
+<section id="roadmap">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">/ Evolution Roadmap</div>
+      <h2>从 MVP 到超纲生态</h2>
+      <p>"MVP 验证核心 → 架构预留插槽 → 逐步注入超纲功能" 的渐进策略。每个 Phase 有明确触发条件，避免过度工程。</p>
+    </div>
+    <div class="roadmap reveal d1">
+      <div class="phase done" data-phase="1">
+        <div class="phase-head">
+          <span class="phase-tag">PHASE 1</span>
+          <h3>MVP · 四层架构闭环</h3>
+        </div>
+        <p>Daemon + Manager + 示例模块（NexusProp Editor）。OverlayFS/Bind 挂载、SELinux 内存修补、SO_PEERCRED IPC、声明式清单。</p>
+        <div class="status done">● 已完成 · 工程落地成功率 90%+</div>
+      </div>
+      <div class="phase" data-phase="2">
+        <div class="phase-head">
+          <span class="phase-tag">PHASE 2</span>
+          <h3>FUSE 幻影文件系统</h3>
+        </div>
+        <div class="trigger"><b>触发条件：</b>OverlayFS 在 Android 15/16 出现严重性能瓶颈或兼容性问题时</div>
+        <p>实现 <code>IFileSystemInterceptor</code> 的 FUSE 版本。基于 libfuse 用户态文件系统，结合正则/AST 解析实现"千 App 千面"动态文件生成。MVP 已预留 <code>prepareFuse()</code> 接口插槽。</p>
+        <div class="status next">○ 下一阶段 · 接口已预留</div>
+      </div>
+      <div class="phase" data-phase="3">
+        <div class="phase-head">
+          <span class="phase-tag">PHASE 3</span>
+          <h3>意图总线与内存缝合</h3>
+        </div>
+        <div class="trigger"><b>触发条件：</b>模块数量增加，出现 build.prop 或系统文件覆盖冲突时</div>
+        <p>重构 <code>IModuleLoader</code>，引入 Pub/Sub 事件总线。模块对系统属性的修改从"物理覆盖"转变为"内存中的意图缝合"，多模块同路径叠加而非覆盖。</p>
+        <div class="status">○ 架构预留 · EventBus 抽象已就位</div>
+      </div>
+      <div class="phase" data-phase="4">
+        <div class="phase-head">
+          <span class="phase-tag">PHASE 4</span>
+          <h3>Agent 运行时与状态机</h3>
+        </div>
+        <div class="trigger"><b>触发条件：</b>基础功能稳定，开始追求"自适应"和"智能化"时</div>
+        <p>Daemon 内嵌轻量脚本引擎（Lua / Wasm）。模块可声明 <code>REGISTER_AGENT</code> 能力，基于状态机根据系统温度、内存状态自动调整行为，实现"自演化模块"。现有 .sh 脚本无需重写。</p>
+        <div class="status">○ 架构预留 · capabilities 已含 REGISTER_AGENT</div>
+      </div>
+      <div class="phase" data-phase="5">
+        <div class="phase-head">
+          <span class="phase-tag">PHASE 5</span>
+          <h3>App 隔离沙盒（需求已收缩）</h3>
+        </div>
+        <div class="trigger"><b>需求收缩：</b>原"整机无重启平行宇宙"受 Zygote 全局 NS 限制无法完美实现，改为 App 级隔离沙盒</div>
+        <p>深度整合 Linux Namespace（PID/Mount/Network/UTS），针对单个 App 实现独立模块配置集热切换。<b>不</b>挑战 Zygote 全局命名空间，规避崩溃与变砖风险。</p>
+        <div class="status risk">⚠ 需求已收缩 · 风险显著降低</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ OPTIMIZATIONS ============ -->
+<section id="optimizations">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">/ Optimization Points</div>
+      <h2>已落地整改与小优化点</h2>
+      <p>严重问题已在 MVP spec 中当场解决（不记录为"待办"）。以下为已落地的关键整改与持续优化方向。</p>
+    </div>
+    <div class="opt-grid">
+      <div class="opt-card warn reveal d1">
+        <div class="opt-title">跨机型 OverlayFS 兜底 <span class="badge">整改#1</span></div>
+        <div class="opt-body">内核不支持 OverlayFS 时自动切换 Bind Mount；均不可用进入只读模式。EROFS 上目标不存在则跳过并告警，不阻断启动。</div>
+        <div class="opt-where">spec-01 §6.2-6.5 · FsDetector::select()</div>
+      </div>
+      <div class="opt-card warn reveal d1">
+        <div class="opt-title">Root 环境依赖校验 <span class="badge">整改#2</span></div>
+        <div class="opt-body">Daemon 启动期检测 Magisk/KSU/APatch，自动适配 sepolicy 路径与 overlay 存储目录。Unknown provider 进入只读模式，避免误操作变砖。</div>
+        <div class="opt-where">spec-01 §5.1 · RootEnvironmentDetector</div>
+      </div>
+      <div class="opt-card warn reveal d2">
+        <div class="opt-title">IPC 凭证校验 <span class="badge">整改#3</span></div>
+        <div class="opt-body">SO_PEERCRED 校验客户端 UID + SELinux 域 + 包名 + APK 签名指纹四重校验。陌生 APP 连接立即被关闭，防止越权调用 Root 能力。</div>
+        <div class="opt-where">spec-01 §10.2 · CredentialCheck</div>
+      </div>
+      <div class="opt-card warn reveal d2">
+        <div class="opt-title">Phase 5 需求收缩 <span class="badge">整改#4</span></div>
+        <div class="opt-body">"整机无重启切换系统"改为"App 隔离沙盒"。规避 Zygote 全局命名空间硬限制，大幅降低崩溃、变砖风险。</div>
+        <div class="opt-where">spec-01 §1.3 · Web 路线图 Phase 5</div>
+      </div>
+      <div class="opt-card warn reveal d3">
+        <div class="opt-title">模块冲突机制 <span class="badge">整改#5</span></div>
+        <div class="opt-body">IModuleLoader 按 DMM priority 字段升序挂载，高优先级覆盖低优先级。Phase 3 事件总线完成内存缝合，多模块同路径叠加。</div>
+        <div class="opt-where">spec-01 §7.3 · spec-03 §6</div>
+      </div>
+      <div class="opt-card info reveal d3">
+        <div class="opt-title">Bootloop 防护</div>
+        <div class="opt-body">连续 2 次未到 boot_completed 自动进入安全模式；失败计数器 ≥3 强制 safe_mode 文件存在。所有 syscall 失败均有 fallback，绝不 _exit(1) 触发 init 重启风暴。</div>
+        <div class="opt-where">spec-01 §13</div>
+      </div>
+      <div class="opt-card info reveal d3">
+        <div class="opt-title">日志双写 + 滚动</div>
+        <div class="opt-body">内存 ring buffer 供 IPC 实时订阅 + 落盘 512KiB 滚动 ×3。绝不写 stderr，避免 init 早期重定向丢失。</div>
+        <div class="opt-where">spec-01 §4.2</div>
+      </div>
+      <div class="opt-card reveal d3">
+        <div class="opt-title">脚本超时与隔离</div>
+        <div class="opt-body">所有 .sh 在独立 Mount Namespace 执行，120s 超时 kill。退出码 2 标记模块 disabled，下次启动不加载。</div>
+        <div class="opt-where">spec-01 §7.4 · spec-03 §7.2</div>
+      </div>
+      <div class="opt-card reveal d3">
+        <div class="opt-title">Manager 断线自愈</div>
+        <div class="opt-body">指数退避 + 抖动重连，所有 pending 请求断线立即失败避免挂起。SharedFlow 多订阅者共享事件流。</div>
+        <div class="opt-where">spec-02 §3.3-3.4</div>
+      </div>
+      <div class="opt-card info reveal d3">
+        <div class="opt-title">能力最小权限</div>
+        <div class="opt-body">capabilities 白名单强制校验。未声明 EXECUTE_SHELL 却提供 service.sh → 跳过并记录 CAPABILITY_DENIED。</div>
+        <div class="opt-where">spec-03 §3.2 · §4</div>
+      </div>
+      <div class="opt-card reveal d3">
+        <div class="opt-title">签名指纹防伪</div>
+        <div class="opt-body">Manager APK 签名 SHA256 白名单。伪造 Manager 即使同包名同 UID 也会被 Daemon 拒绝。</div>
+        <div class="opt-where">spec-01 §10.2 · CredentialCheck::authorize</div>
+      </div>
+      <div class="opt-card reveal d3">
+        <div class="opt-title">URI → tmp 桥接</div>
+        <div class="opt-body">SAF URI 无法被 root Daemon 直接读，FileBridge 复制到 /data/local/tmp 再传路径。避免权限边界穿透。</div>
+        <div class="opt-where">spec-02 §6.5</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <div class="brand" style="margin-bottom:8px"><span class="dot"></span><span class="name">NexusCore</span></div>
+      <div>Android Root Framework · MVP v1.0 · 2026</div>
+    </div>
+    <div class="specs">
+      <a href="../specs/spec-01-daemon.md">spec-01-daemon.md</a>
+      <a href="../specs/spec-02-manager.md">spec-02-manager.md</a>
+      <a href="../specs/spec-03-module-sdk.md">spec-03-module-sdk.md</a>
+      <a href="../sdk/docs/developer-guide.md">developer-guide.md</a>
+      <a href="../sdk/nexus_module.schema.json">nexus_module.schema.json</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // ============ Reveal on scroll ============
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // ============ Knowledge graph interactivity ============
+  const NODE_DATA = {
+    'm-nexusprop': {
+      title: 'NexusProp Editor', tag: '示例模块',
+      body: 'NexusCore 官方示例模块。安装时读取真实 /system/build.prop，修改 ro.debuggable / ro.secure，生成新文件由 Daemon bind mount 到 /system/build.prop。完整演示 manifest + customize.sh + service.sh 流程。',
+      contract: 'manifest.json · customize.sh · service.sh · priority=100'
+    },
+    'm-custom': {
+      title: 'Custom Module', tag: '第三方模块',
+      body: '任何遵循 DMM 规范的第三方模块。ZIP 包含 manifest.json + system/ + 可选脚本。Daemon 校验 capabilities 后授权执行。',
+      contract: 'manifest.json (DMM) · system/ · *.sh'
+    },
+    'm-manifest': {
+      title: 'manifest.json (DMM)', tag: '整改#5',
+      body: '声明式模块清单。除元数据外，还声明 capabilities（能力白名单）与 intents（意图订阅）。未声明的能力一律 CAPABILITY_DENIED。priority 字段解决多模块冲突。',
+      contract: '{ id, name, version, capabilities[], intents[], priority }'
+    },
+    'c-dash': {
+      title: 'Dashboard', tag: 'Compose UI',
+      body: '主页。显示 Root 状态、SELinux 状态、Daemon 运行状态。提供"重启 Daemon"和"进入安全模式"快捷按钮。连接状态变化时自动刷新。',
+      contract: 'DashboardViewModel · StateFlow<SystemStatus>'
+    },
+    'c-mods': {
+      title: 'Modules', tag: 'Compose UI',
+      body: '模块管理页。列表展示已安装模块，每个卡片含开关、版本、作者、描述、capabilities。支持本地 ZIP 安装（经 FileBridge 桥接）和卸载。',
+      contract: 'ModulesViewModel · StateFlow<List<ModuleUi>>'
+    },
+    'c-logs': {
+      title: 'Logs', tag: 'Compose UI',
+      body: '实时日志页。通过 IPC 订阅 Daemon 的 LogLineEvent，SharedFlow 流式显示。滑动窗口 2000 行避免 OOM，新日志自动滚到底。',
+      contract: 'LogsViewModel · Flow<List<LogLine>>'
+    },
+    'c-ipc': {
+      title: 'NexusIpcClient', tag: 'IPC 核心',
+      body: 'Manager 侧 IPC 客户端。UDS 传输 + Protobuf 编解码 + 帧长度前缀。指数退避断线重连，所有 pending 请求断线立即失败。事件用 SharedFlow 多订阅共享。',
+      contract: 'connection: StateFlow · events: SharedFlow · request(): Response'
+    },
+    'a-moduleloader': {
+      title: 'ModuleLoader', tag: '整改#5',
+      body: '实现 IModuleLoader。解析 manifest.json，按 priority 升序排序后挂载（高优先级覆盖低优先级）。校验 capabilities，未声明的脚本被跳过。',
+      contract: 'parseManifest() · loadModule() · unloadModule() · listLoaded()'
+    },
+    'a-shell': {
+      title: 'ShellExecutor', tag: '安全执行',
+      body: '在独立 Mount Namespace 内 fork+execve 执行模块脚本。120s 超时 kill。注入 NEXUS_MODULE_PATH 等环境变量。退出码 2 标记模块 disabled。',
+      contract: 'runStage(BootStage) · execScript(path, envVars)'
+    },
+    'a-prociso': {
+      title: 'ProcessIsolator', tag: 'Namespace',
+      body: '实现 IProcessIsolator。unshare(CLONE_NEWNS) 创建独立挂载视图，先 mount("/", "/", MS_REC|MS_SLAVE) 切断 propagation 防止子进程挂载泄漏到全局。',
+      contract: 'createNamespace(flags) · enterNamespace() · unshare(flags)'
+    },
+    'a-eventbus': {
+      title: 'EventBus', tag: 'Pub/Sub',
+      body: '实现 IEventBus。MVP 用内存回调 + pending 队列，主循环 tick() 派发。为 Phase 3 意图总线与 Phase 4 Agent 协同预留抽象。',
+      contract: 'publishEvent(name, payload) · subscribeEvent(name, cb) · tick()'
+    },
+    'd-rootenv': {
+      title: 'RootEnvironmentDetector', tag: '整改#2',
+      body: '启动期检测 Root 来源（Magisk/KSU/APatch）、版本、内核 FS 能力（overlay/fuse）、动态分区。Unknown provider 进入只读模式，避免误操作变砖。',
+      contract: 'static detect() -> Result<RootEnvironment>'
+    },
+    'd-watchdog': {
+      title: 'Watchdog', tag: '保活',
+      body: '线程级重启：工作线程退出后由 supervisor 线程 1s 后重启。连续 3 次失败才 _exit(1) 触发 init restart。PID 文件 O_CREAT|O_EXCL 防双开。',
+      contract: 'spawn(Worker, name) · stop()'
+    },
+    'd-fs': {
+      title: 'FileSystemInterceptor', tag: '整改#1',
+      body: '实现 IFileSystemInterceptor。FsDetector 优先选 OverlayFS，不可用回退 Bind Mount，再不可用进入只读。prepareFuse() 预留 FUSE 插槽（MVP 返回 NotImplemented）。处理 EROFS 与动态分区。',
+      contract: 'detect() · mountOverlay(t) · mountAll(ts) · unmountAll() · prepareFuse()'
+    },
+    'd-selinux': {
+      title: 'SELinuxManager', tag: '安全',
+      body: '基于 libsepol/sepolicy-inject 在内存修补 policy.32，仅放宽 u:r:nexus_daemon:s0 自身域。绝不全局 setenforce 0。修补失败先尝试局部 permissive 域，最后才 setenforce 0 + 告警。',
+      contract: 'patchSelfDomain() · injectRule(s,t,c,p) · restore()'
+    },
+    'd-ipc': {
+      title: 'IpcServer (UDS)', tag: '整改#3',
+      body: 'Unix Domain Socket 服务端。accept 后立即 SO_PEERCRED 校验客户端 UID + SELinux 域 + 包名 + APK 签名指纹。陌生连接立即关闭。socket 权限 0660 root:system。',
+      contract: 'start(socketPath) · stop() · CredentialCheck::authorize(peer)'
+    },
+    'd-logger': {
+      title: 'Logger', tag: '可观测',
+      body: '双写：内存 ring buffer（1MiB，供 IPC 实时订阅）+ 落盘 512KiB 滚动 ×3。绝不写 stderr，避免 init 早期重定向丢失。日志通过 LogLineEvent 事件广播给 Manager。',
+      contract: 'init(filePath, ringBytes) · write(Level, tag, msg) · flush()'
+    }
+  };
+
+  const detailEl = document.getElementById('graphDetail');
+  const nodes = document.querySelectorAll('.gnode');
+  const edges = document.querySelectorAll('.gedge');
+
+  function activateNode(id) {
+    nodes.forEach(n => n.classList.toggle('active', n.dataset.id === id));
+    edges.forEach(e => {
+      const match = e.dataset.from === id || e.dataset.to === id;
+      e.classList.toggle('active', match);
+    });
+    const d = NODE_DATA[id];
+    if (!d) {
+      detailEl.innerHTML = '<div class="detail-empty">点击上方任意节点查看职责、核心契约与所在 Spec 章节。</div>';
+      return;
+    }
+    detailEl.innerHTML = `
+      <h4>${d.title} <span class="tag">${d.tag}</span></h4>
+      <div class="detail-body">${d.body}</div>
+      <div class="detail-contract">${d.contract}</div>
+    `;
+  }
+
+  nodes.forEach(n => {
+    n.addEventListener('click', () => activateNode(n.dataset.id));
+    n.addEventListener('mouseenter', () => {
+      edges.forEach(e => {
+        const match = e.dataset.from === n.dataset.id || e.dataset.to === n.dataset.id;
+        e.style.stroke = match ? 'var(--accent)' : '';
+        e.style.opacity = match ? '1' : '0.3';
+      });
+    });
+    n.addEventListener('mouseleave', () => {
+      edges.forEach(e => {
+        if (!e.classList.contains('active')) {
+          e.style.stroke = '';
+          e.style.opacity = '';
+        }
+      });
+    });
+  });
+
+  // 默认激活 IPC 通道（最关键的跨层连接）
+  setTimeout(() => activateNode('c-ipc'), 600);
+</script>
+
+</body>
+</html>
