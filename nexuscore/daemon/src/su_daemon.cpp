@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #ifdef __ANDROID__
 #include <pty.h>
@@ -290,7 +291,7 @@ void SuDaemon::forkRootShell(const SuRequest& req) {
     pid_t pid = ::fork();
 #endif
     if (pid < 0) {
-        NX_LOG_E("SuDaemon", "fork failed: %s", ::strerror(errno));
+        NX_LOG_E("SuDaemon", "fork failed: %s", nexus::errnoString(errno).c_str());
         return;
     }
 

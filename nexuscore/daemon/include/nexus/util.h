@@ -55,4 +55,15 @@ private:
     int fd_ = -1;
 };
 
+/// Phase 2: 线程安全的 errno → string 转换
+/// strerror 是全局状态非线程安全，strerror_r 是线程安全版本
+std::string errnoString(int err);
+
+/// Phase 2: 路径安全校验，防止 shell 注入与路径遍历
+/// 拒绝危险字符：' ; ` $ ( ) [ ] { } \ | & < > ..
+bool isPathSafe(const std::string& path);
+
+/// Phase 2: 校验模块 ID（与 ModuleLoader::isValidIdStatic 等价）
+bool isValidModuleId(const std::string& id);
+
 } // namespace nexus

@@ -339,4 +339,49 @@ void PidFile::release() {
     }
 }
 
+/// Phase 2: 线程安全的 errno → string 转换
+std::string errnoString(int err) {
+    char buf[256];
+    buf[0] = '\0';
+    // XSI 版本 strerror_r 返回 int；GNU 版本返回 char*
+    // 用特征检测兼容两种实现
+#if defined(_GNU_SOURCE) && !defined(__ANDROID__)
+    char* r = strerror_r(err, buf, sizeof(buf));
+    return std::string(r);
+#else
+    int r = strerror_r(err, buf, sizeof(buf));
+    (void)r;
+    return std::string(buf);
+#endif
+}
+
+/// Phase 2: 路径安全校验
+/// 拒绝危险字符：' ; ` $ ( ) [ ] { } \ | & < > ..
+/// 允许：字母 数字 / . _ - 空格
+bool isPathSafe(const std::string& path) {
+    if (path.empty()) return false;
+    // 拒绝路径遍历
+    if (path.find("..") != std::string::npos) return false;
+    // 拒绝 shell 特殊字符
+    static const std::string dangerous = "';`$()[]{}\\|&<>";
+    for (char c : path) {
+        if (dangerous.find(c) != std::string::npos) return false;
+    }
+    return true;
+}
+
+/// Phase 2: 校验模块 ID
+bool isValidModuleId(const std::string& id) {
+    if (id.empty()) return false;
+    char first = id[0];
+    if (first < 'a' || first > 'z') return false;
+    if (id.size() < 3 || id.size() > 64) return false;
+    for (size_t i = 1; i < id.size(); ++i) {
+        char c = id[i];
+        bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
+
 } // namespace nexus

@@ -97,9 +97,10 @@ static void test_publish_log_helper() {
     std::string capturedTag, capturedMsg;
     bus.subscribe([&](const Event& ev) {
         if (ev.name == "LOG_LINE") {
-            capturedLevel = (log::Level)std::stoul(ev.fields["level"]);
-            capturedTag = ev.fields["tag"];
-            capturedMsg = ev.fields["msg"];
+            // Phase 1 修复：const Event& 不能用 operator[]（会插入），改用 .at()
+            capturedLevel = (log::Level)std::stoul(ev.fields.at("level"));
+            capturedTag = ev.fields.at("tag");
+            capturedMsg = ev.fields.at("msg");
         }
     });
     bus.publishLog(log::Level::Warn, "TestTag", "warning message");
@@ -114,7 +115,7 @@ static void test_publish_module_loaded() {
     std::string capturedId;
     bus.subscribe([&](const Event& ev) {
         if (ev.name == "MODULE_LOADED") {
-            capturedId = ev.fields["id"];
+            capturedId = ev.fields.at("id");
         }
     });
     bus.publishModuleLoaded("test_module_123");
@@ -128,10 +129,10 @@ static void test_publish_su_request() {
     uint32_t uid = 0, pid = 0;
     bus.subscribe([&](const Event& ev) {
         if (ev.name == "SU_REQUEST") {
-            pkg = ev.fields["package_name"];
-            uid = std::stoul(ev.fields["uid"]);
-            pid = std::stoul(ev.fields["pid"]);
-            cmd = ev.fields["command"];
+            pkg = ev.fields.at("package_name");
+            uid = std::stoul(ev.fields.at("uid"));
+            pid = std::stoul(ev.fields.at("pid"));
+            cmd = ev.fields.at("command");
         }
     });
     bus.publishSuRequest("com.example.app", 10042, 12345, "su -c id");

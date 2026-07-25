@@ -106,7 +106,12 @@ public:
 
 private:
     /// 检查 boot image magic（ANDROID!）
+    /// 重载支持 string 与 vector 两种调用方式
+    /// Phase 7: 改为 public 供测试调用
+public:
     static bool checkMagic(const std::vector<uint8_t>& data);
+    static bool checkMagic(const std::string& data);
+private:
 
     /// 计算并写入新的 SHA1
     static void updateSha1(std::vector<uint8_t>& image, const BootImageInfo& info);

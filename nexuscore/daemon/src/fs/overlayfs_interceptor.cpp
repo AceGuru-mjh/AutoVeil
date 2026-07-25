@@ -2,6 +2,7 @@
 #include "nexus/util.h"
 #include "nexus/log.h"
 
+#include <cstring>
 #include <linux/loop.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -61,7 +62,7 @@ Result<bool> OverlayFsInterceptor::detect(const RootEnvironment& env) {
     int r = ::mount("overlay", probeMnt.c_str(), "overlay",
                     MS_NODEV | MS_NOATIME, opts.c_str());
     if (r < 0) {
-        NX_LOG_D("OverlayFs", "probe failed: %s", ::strerror(errno));
+        NX_LOG_D("OverlayFs", "probe failed: %s", nexus::errnoString(errno).c_str());
         return false;
     }
     ::umount2(probeMnt.c_str(), MNT_DETACH);
@@ -112,7 +113,7 @@ Result<void> OverlayFsInterceptor::mountOverlay(const MountTarget& t) {
     if (::mount("overlay", t.target.c_str(), "overlay",
                 MS_NODEV | MS_NOATIME, opts.c_str()) < 0) {
         NX_LOG_W("OverlayFs", "mount failed for %s: %s",
-                 t.target.c_str(), ::strerror(errno));
+                 t.target.c_str(), nexus::errnoString(errno).c_str());
         return {unexpect, Err::MountFailed};
     }
     mounted_.push_back(t.target);

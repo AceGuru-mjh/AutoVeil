@@ -5,6 +5,7 @@
 #ifdef __ANDROID__
 #include <cutils/properties.h>
 #endif
+#include <fcntl.h>
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>

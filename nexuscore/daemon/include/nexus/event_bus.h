@@ -2,9 +2,12 @@
 
 #include "nexus/types.h"
 #include "nexus/log.h"
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace nexus {
@@ -23,6 +26,19 @@ struct Event {
     uint64_t timestampMs;
     // payload 以 string/数字形式携带（MVP 不引入 protobuf 依赖）
     std::unordered_map<std::string, std::string> fields;
+
+    /// Phase 2: const 安全的字段查找，避免在 const Event& 上用 operator[] 触发插入
+    /// @return 字段值指针，不存在返回 nullptr
+    const std::string* findField(const std::string& key) const {
+        auto it = fields.find(key);
+        return it != fields.end() ? &it->second : nullptr;
+    }
+
+    /// 便捷获取字段值，不存在返回 default
+    std::string getField(const std::string& key, const std::string& defaultVal = "") const {
+        auto it = fields.find(key);
+        return it != fields.end() ? it->second : defaultVal;
+    }
 };
 
 class EventBus {

@@ -9,6 +9,9 @@ add_executable(nexusd_tests
     test_module_loader.cpp
     test_event_bus.cpp
     test_script_executor.cpp
+    test_boot_patcher.cpp
+    test_magisk_compat.cpp
+    test_su_daemon.cpp
 )
 
 # 复用 daemon 的源文件作为测试对象
@@ -33,6 +36,10 @@ target_sources(nexusd_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ipc/handlers.cpp
     ${CMAKE_SOURCE_DIR}/src/ipc/nexuscli_lib.cpp
     ${CMAKE_SOURCE_DIR}/src/daemon_core.cpp
+    ${CMAKE_SOURCE_DIR}/src/boot/boot_patcher.cpp
+    ${CMAKE_SOURCE_DIR}/src/boot/nexus_rc.cpp
+    ${CMAKE_SOURCE_DIR}/src/su_daemon.cpp
+    ${CMAKE_SOURCE_DIR}/src/magisk_compat.cpp
 )
 
 target_include_directories(nexusd_tests PRIVATE
@@ -45,5 +52,9 @@ target_link_libraries(nexusd_tests PRIVATE Threads::Threads)
 
 # 测试时禁用 Android 特定代码（log.cpp 用 __android_log_print，host 测试时 stub）
 target_compile_definitions(nexusd_tests PRIVATE NEXUS_TEST_HOST=1)
+
+# Phase 7: boot_patcher 用 SHA1，需要链接 OpenSSL
+find_package(OpenSSL REQUIRED)
+target_link_libraries(nexusd_tests PRIVATE OpenSSL::Crypto)
 
 add_test(NAME nexusd_tests COMMAND nexusd_tests)

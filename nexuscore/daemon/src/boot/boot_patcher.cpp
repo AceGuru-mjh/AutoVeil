@@ -111,6 +111,12 @@ bool BootPatcher::checkMagic(const std::vector<uint8_t>& data) {
            std::memcmp(data.data(), VENDOR_BOOT_MAGIC, VENDOR_BOOT_MAGIC_SIZE) == 0;
 }
 
+bool BootPatcher::checkMagic(const std::string& data) {
+    if (data.size() < BOOT_MAGIC_SIZE) return false;
+    return std::memcmp(data.data(), BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0 ||
+           std::memcmp(data.data(), VENDOR_BOOT_MAGIC, VENDOR_BOOT_MAGIC_SIZE) == 0;
+}
+
 Result<BootPatcher::BootImageInfo> BootPatcher::parseHeader(const std::string& bootImgPath) {
     auto content = readFile(bootImgPath);
     if (!content) {
@@ -303,7 +309,9 @@ Result<std::vector<uint8_t>> BootPatcher::patchRamdisk(
     }
 
     // 追加 nexusd 二进制（mode 0755）
-    writeCpioEntry(out, "nexusd", *nexusdBin, 0100755);
+    // Phase 1 修复：readFile 返回 string，需转为 vector<uint8_t>
+    std::vector<uint8_t> nexusdVec(nexusdBin->begin(), nexusdBin->end());
+    writeCpioEntry(out, "nexusd", nexusdVec, 0100755);
 
     // 追加 nexus.rc（init service 定义，mode 0644）
     std::vector<uint8_t> rcContent(initScript.begin(), initScript.end());
@@ -350,7 +358,8 @@ Result<std::vector<uint8_t>> BootPatcher::repackImage(
         return {unexpect, Err::IoError};
     }
 
-    std::vector<uint8_t> out(*content);
+    // Phase 1 修复：readFile 返回 string，需用迭代器构造 vector
+    std::vector<uint8_t> out(content->begin(), content->end());
 
     // 更新 ramdisk 内容
     // 简化：找到 ramdisk 偏移，替换为新 ramdisk

@@ -8,7 +8,7 @@ name: Build & Test Daemon
 
 on:
   push:
-    branches: [main, fix/comprehensive-overhaul, 'feat/**']
+    branches: [main, fix/comprehensive-overhaul, fix/**, 'feat/**']
     paths:
       - 'nexuscore/daemon/**'
       - '.github/workflows/daemon.yml'
@@ -30,7 +30,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y build-essential cmake libssl-dev
 
       - name: Configure (host, no Android)
         working-directory: nexuscore/daemon
@@ -95,12 +95,22 @@ jobs:
         working-directory: nexuscore/daemon
         run: cmake --build build-arm64 -j --target nexuscli
 
+      - name: Build su
+        working-directory: nexuscore/daemon
+        run: cmake --build build-arm64 -j --target su
+
+      - name: Build nexuspolicy
+        working-directory: nexuscore/daemon
+        run: cmake --build build-arm64 -j --target nexuspolicy
+
       - name: Verify binaries
         working-directory: nexuscore/daemon
         run: |
           file build-arm64/nexusd
           file build-arm64/nexuscli
-          ls -lh build-arm64/nexusd build-arm64/nexuscli
+          file build-arm64/su
+          file build-arm64/nexuspolicy
+          ls -lh build-arm64/nexusd build-arm64/nexuscli build-arm64/su build-arm64/nexuspolicy
 
       - name: Upload nexusd binary
         uses: actions/upload-artifact@v4
@@ -115,5 +125,21 @@ jobs:
         with:
           name: nexuscli-arm64
           path: nexuscore/daemon/build-arm64/nexuscli
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload su binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: su-arm64
+          path: nexuscore/daemon/build-arm64/su
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload nexuspolicy binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexuspolicy-arm64
+          path: nexuscore/daemon/build-arm64/nexuspolicy
           if-no-files-found: error
           retention-days: 30

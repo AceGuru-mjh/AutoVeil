@@ -5,11 +5,13 @@
 #include "nexus/env_detector.h"
 #include "nexus/module_loader.h"
 #include "nexus/script_executor.h"
+#include "nexus/su_daemon.h"
 #include "nexus/fs/i_file_system_interceptor.h"
 #include "nexus/fs/fs_detector.h"
 #include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace nexus {
@@ -115,6 +117,10 @@ private:
     ModuleLoader loader_;
     std::vector<ModuleLoader::LoadedModule> modules_;
 
+    // Phase 5: SU 守护进程集成
+    SuDaemon suDaemon_;
+    std::thread suDaemonThread_;
+
     bool readOnly_ = false;
     bool safeMode_ = false;
     // Phase 1.4 修复：原 running_ 是普通 bool，跨线程读写有数据竞争。
@@ -123,9 +129,7 @@ private:
     uint32_t pid_ = 0;
     uint64_t startTimeMs_ = 0;
 
-    // SU 策略持久化（/data/adb/nexuscore/su_policy.json）
-    std::vector<SuApp> suApps_;
-    std::vector<SuLogEntry> suLogs_;
+    // SU 策略持久化（Phase 5: 委托给 suDaemon_，保留兼容方法）
     void loadSuState();
     void saveSuState();
 
