@@ -35,6 +35,9 @@ message Request {
     ClearLogsRequest       clear_logs        = 14;
     RebootRequest          reboot            = 15;
     UninstallFrameworkRequest uninstall_framework = 16;
+    // Phase 7: 独立 Root 模式 - Boot Patcher
+    PatchBootRequest       patch_boot        = 17;
+    GetBootPatcherStatusRequest get_boot_patcher_status = 18;
   }
 }
 
@@ -74,6 +77,13 @@ message RebootRequest {
 }
 message UninstallFrameworkRequest {}
 
+// Phase 7: 独立 Root 模式 - Boot Patcher
+message PatchBootRequest {
+  string boot_img_path = 1;        // 原始 boot.img 路径
+  string output_path = 2;          // 修补后输出路径
+}
+message GetBootPatcherStatusRequest {}
+
 // ============ Response ============
 message Response {
   int32 code = 1;   // 0 = OK，其他 = Err 枚举值
@@ -86,6 +96,9 @@ message Response {
     InstallModuleResponse   install_module    = 14;
     ListSuAppsResponse      list_su_apps      = 15;
     ListSuLogsResponse      list_su_logs      = 16;
+    // Phase 7: Boot Patcher
+    PatchBootResponse       patch_boot        = 17;
+    GetBootPatcherStatusResponse get_boot_patcher_status = 18;
   }
 }
 
@@ -149,6 +162,21 @@ message SuLogEntry {
   string command = 5;
 }
 message ListSuLogsResponse     { repeated SuLogEntry entries = 1; }
+
+// Phase 7: Boot Patcher
+message PatchBootResponse {
+  bool success = 1;
+  string output_path = 2;
+  string error_msg = 3;
+  string sha1 = 4;                  // 修补后 SHA1
+  bool need_reboot = 5;
+}
+message GetBootPatcherStatusResponse {
+  bool is_rooted = 1;               // NexusCore 是否已 patch boot
+  string boot_path = 2;             // 当前 boot 路径
+  bool has_backup = 3;              // 是否有原始 boot 备份
+  string nexuscore_version = 4;
+}
 
 // ============ Event ============
 message Event {

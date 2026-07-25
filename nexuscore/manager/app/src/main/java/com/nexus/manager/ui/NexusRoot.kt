@@ -43,6 +43,7 @@ import com.nexus.manager.ui.pages.ModuleDetailPage
 import com.nexus.manager.ui.pages.ModulesPage
 import com.nexus.manager.ui.pages.SettingsPage
 import com.nexus.manager.ui.pages.SuperUserPage
+import com.nexus.manager.ui.pages.BootPatcherPage
 import com.nexus.manager.NexusApp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -123,12 +124,18 @@ private fun RootContent() {
                 }
                 composable(Routes.SUPERUSER) { SuperUserPage() }
                 composable(Routes.LOGS) { LogsPage() }
-                composable(Routes.SETTINGS) { SettingsPage() }
+                composable(Routes.SETTINGS) {
+                    SettingsPage(onNavigateToBootPatcher = { navController.navigate(Routes.BOOT_PATCHER) })
+                }
                 composable(
                     route = Routes.MODULE_DETAIL,
                     arguments = listOf(navArgument("moduleId") { type = NavType.StringType }),
                 ) {
                     ModuleDetailPage(onBack = { navController.popBackStack() })
+                }
+                // Phase 7: Boot Patcher
+                composable(Routes.BOOT_PATCHER) {
+                    BootPatcherPage(onBack = { navController.popBackStack() })
                 }
             }
         }

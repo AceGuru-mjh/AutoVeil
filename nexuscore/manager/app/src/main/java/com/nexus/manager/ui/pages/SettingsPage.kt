@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Brightness6
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Fingerprint
@@ -50,6 +51,7 @@ import com.nexus.manager.viewmodel.SettingsViewModel
 @Composable
 fun SettingsPage(
     viewModel: SettingsViewModel = viewModel(factory = NexusViewModelFactory()),
+    onNavigateToBootPatcher: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var uninstallDialog by remember { mutableStateOf(false) }
@@ -169,6 +171,24 @@ fun SettingsPage(
                 AboutRow(label = "Daemon 版本", value = state.daemonVersion)
                 AboutRow(label = "构建类型", value = BuildConfig.BUILD_TYPE)
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Phase 7: 安装 NexusCore（独立 Root 模式）
+        SectionHeader(title = "安装 NexusCore", modifier = Modifier.padding(horizontal = 16.dp))
+        GlassCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            contentPadding = 0.dp,
+        ) {
+            SettingRow(
+                icon = Icons.Outlined.Bolt,
+                title = "修补 boot.img",
+                subtitle = "通过修补 boot.img 让 NexusCore 成为独立 Root 框架（不依赖 Magisk/KSU/APatch）",
+                onClick = onNavigateToBootPatcher,
+            )
         }
 
         Spacer(Modifier.height(16.dp))

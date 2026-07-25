@@ -20,10 +20,11 @@ const char* nexus::errString(Err e) {
 
 const char* nexus::rootProviderName(RootProvider p) {
     switch (p) {
-        case RootProvider::None:     return "none";
-        case RootProvider::Magisk:   return "magisk";
-        case RootProvider::KernelSU: return "kernelsu";
-        case RootProvider::APatch:   return "apatch";
+        case RootProvider::None:       return "none";
+        case RootProvider::Magisk:     return "magisk";
+        case RootProvider::KernelSU:   return "kernelsu";
+        case RootProvider::APatch:     return "apatch";
+        case RootProvider::NexusCore:  return "nexuscore";
     }
     return "unknown";
 }

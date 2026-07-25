@@ -109,6 +109,9 @@ enum class RootProvider {
     Magisk,
     KernelSU,
     APatch,
+    /// Phase 1：NexusCore 自身作为独立 Root 框架（不依赖其他 root）
+    /// 通过自研 boot patcher 修改 boot.img 注入 init service 实现
+    NexusCore,
 };
 
 const char* rootProviderName(RootProvider p);

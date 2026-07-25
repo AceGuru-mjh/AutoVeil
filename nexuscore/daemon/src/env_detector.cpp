@@ -1,6 +1,7 @@
 #include "nexus/env_detector.h"
 #include "nexus/util.h"
 #include "nexus/log.h"
+#include "nexus/version.h"
 
 #ifdef __ANDROID__
 #include <cutils/properties.h>
@@ -11,6 +12,12 @@
 namespace nexus {
 
 RootProvider RootEnvironmentDetector::detectProvider() {
+    // Phase 1：NexusCore 自身作为独立 Root 框架
+    // 通过 /data/adb/nexuscore/.bootstrapped 标记判断 NexusCore 已完成 boot patch
+    // 这个文件由 boot patcher 在修补 boot.img 后首次启动时创建
+    if (probeFile("/data/adb/nexuscore/.bootstrapped")) {
+        return RootProvider::NexusCore;
+    }
     // Magisk: /data/adb/magisk/.magisk 目录存在
     if (probeDir("/data/adb/magisk") || probeFile("/data/adb/magisk/.magisk")) {
         return RootProvider::Magisk;
@@ -60,10 +67,26 @@ Result<RootEnvironment> RootEnvironmentDetector::detect() {
 #endif
             env.adbRootDir = "/data/adb/ap";
             break;
+        case RootProvider::NexusCore:
+            // NexusCore 自身作为 root provider
+            // 版本号从 /data/adb/nexuscore/.version 读取（boot patcher 写入）
+            {
+                auto v = readFile("/data/adb/nexuscore/.version");
+                if (v) {
+                    env.providerVersion = trim(*v);
+                } else {
+                    env.providerVersion = NEXUS_VERSION;
+                }
+            }
+            env.adbRootDir = "/data/adb/nexuscore";
+            break;
         case RootProvider::None:
             break;
     }
-    env.providerVersion = ver;
+    // 仅当 ver 非空时覆盖（NexusCore 已在上面设置 providerVersion）
+    if (ver[0] != '\0') {
+        env.providerVersion = ver;
+    }
 
     env.overlayBase   = "/data/adb/nexuscore/overlay";
     env.modulesDir    = "/data/adb/nexuscore/modules";

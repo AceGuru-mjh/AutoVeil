@@ -14,5 +14,8 @@ object Routes {
 
     const val MODULE_DETAIL = "module_detail/{moduleId}"
 
+    // Phase 7: Boot Patcher 页面
+    const val BOOT_PATCHER = "boot_patcher"
+
     fun moduleDetail(id: String) = "module_detail/$id"
 }
