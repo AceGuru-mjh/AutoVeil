@@ -21,25 +21,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.CollectAsState
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.nexus.manager.data.model.SuPolicy
 import com.nexus.manager.ui.components.GlassSurface
 import com.nexus.manager.ui.theme.NexusTheme
-import com.nexus.manager.viewmodel.NexusViewModelFactory
-import com.nexus.manager.viewmodel.SuRequestViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 
 /**
@@ -105,7 +98,7 @@ class SuRequestActivity : Activity() {
                     onRespond = { policy ->
                         // 调用 daemon 设置策略
                         lifecycleScope.launch {
-                            val app = applicationContext as? NexusApp
+                            val app = application as? NexusApp
                             app?.repository?.setSuPolicy(packageName, uid, policy, timeoutSecFor(policy))
                             finish()
                         }
@@ -113,7 +106,7 @@ class SuRequestActivity : Activity() {
                     onDismiss = {
                         // "稍后" 等价于 DENY + 60s 短超时
                         lifecycleScope.launch {
-                            val app = applicationContext as? NexusApp
+                            val app = application as? NexusApp
                             app?.repository?.setSuPolicy(packageName, uid, SuPolicy.DENY, 60)
                             finish()
                         }

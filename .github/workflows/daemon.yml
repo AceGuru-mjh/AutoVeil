@@ -42,15 +42,13 @@ jobs:
 
       - name: Build tests
         working-directory: nexuscore/daemon
-        run: cmake --build build-host -j --target nexusd_tests
+        run: cmake --build build-host -j
 
       - name: Run unit tests
         working-directory: nexuscore/daemon
         run: |
           cd build-host
-          ctest --verbose
-          # 直接执行，便于看输出
-          ./nexusd_tests || (echo "TESTS FAILED" && exit 1)
+          ctest --verbose --output-on-failure || (echo "TESTS FAILED" && exit 1)
 
   android-cross-compile:
     name: Android NDK arm64-v8a cross-compile
