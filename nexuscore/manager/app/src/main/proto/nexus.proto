@@ -117,8 +117,10 @@ message ModuleInfo {
   bool enabled       = 6;
   int32  priority    = 7;
   repeated string capabilities = 8;
-  bool has_update    = 9;
-  string update_url  = 10;
+  // RESERVED 字段：MVP 不实现模块自升级与自动检查更新（详见 spec-02 §1.2 修订）。
+  // 保留字段供 Phase 2+ 在线模块仓库使用。当前 Manager 端始终填充 has_update=false / update_url=""。
+  bool has_update    = 9 [deprecated = true];
+  string update_url  = 10 [deprecated = true];
 }
 message ListModulesResponse    { repeated ModuleInfo modules = 1; }
 message EmptyResponse          {}

@@ -45,8 +45,16 @@ class LogsViewModel(
 
     init { restartSubscription() }
 
+    /**
+     * 整改 B11：原 setMinLevel 重新订阅后 _lines 旧日志仍保留，可能包含级别低于新阈值的旧行。
+     * 改为：切换级别时清空本地缓冲，仅保留新阈值以上的日志（避免历史污染）。
+     */
     fun setMinLevel(level: Int) {
-        _minLevel.value = level.coerceIn(0, 4)
+        val newLevel = level.coerceIn(0, 4)
+        if (_minLevel.value == newLevel) return
+        _minLevel.value = newLevel
+        // 清空旧缓冲（旧日志可能包含级别低于新阈值的行）
+        _lines.value = emptyList()
         restartSubscription()
     }
 

@@ -30,7 +30,35 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            // 整改 B18：原 release 用 debug key 签名，daemon 端的签名校验失效，
+            // 且 release APK 与 debug APK 签名相同导致安装冲突。
+            // 改为：通过 local.properties 读取 release keystore 路径与密码（不入库）；
+            //       未配置时回退到 debug key 并打 warning，方便 CI 与本地未配置开发者继续构建。
+            signingConfig = run {
+                val props = java.util.Properties()
+                val localProps = rootProject.file("local.properties")
+                if (localProps.exists()) {
+                    localProps.inputStream().use { props.load(it) }
+                }
+                val storeFile = props.getProperty("release.storeFile")?.let(::File)
+                val storePass = props.getProperty("release.storePassword")
+                val keyAlias = props.getProperty("release.keyAlias")
+                val keyPass = props.getProperty("release.keyPassword")
+                if (storeFile != null && storeFile.exists() && storePass != null &&
+                    keyAlias != null && keyPass != null) {
+                    signingConfigs.create("release") {
+                        this.storeFile = storeFile
+                        this.storePassword = storePass
+                        this.keyAlias = keyAlias
+                        this.keyPassword = keyPass
+                    }
+                } else {
+                    println("WARNING: release keystore not configured in local.properties; " +
+                        "falling back to debug key. Configure: release.storeFile / release.storePassword / " +
+                        "release.keyAlias / release.keyPassword")
+                    signingConfigs.getByName("debug")
+                }
+            }
         }
         debug {
             isMinifyEnabled = false

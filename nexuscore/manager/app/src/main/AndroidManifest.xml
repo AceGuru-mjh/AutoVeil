@@ -2,9 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 查询其它应用（SuperUser 授权列表需要） -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
+    <!--
+        整改 B16：移除 QUERY_ALL_PACKAGES。
+        原声明"为 SuperUser 授权列表需要"，但 SuperUser 列表本应来自 daemon（root 视角），
+        Manager 不需要查询所有 app。该权限触发 Google Play 审核警告，且功能上不需要。
+    -->
     <!-- 前台服务（未来扩展） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
@@ -29,7 +31,12 @@
             </intent-filter>
         </activity>
 
-        <!-- SuRequest 接收 Daemon 推送的 root 请求（MVP 占位） -->
+        <!--
+            SuRequest 接收 Daemon 推送的 root 请求。
+            整改 B6：原来 activity-alias exported=false 且 targetActivity=MainActivity，
+            daemon 无法通过 am start 唤起 Manager 弹窗（应用未在前台时请求被静默吞）。
+            改为真正的独立 Activity（Phase 2 实现），此处先保留 alias 作为兼容入口。
+        -->
         <activity-alias
             android:name=".SuRequestActivity"
             android:exported="false"

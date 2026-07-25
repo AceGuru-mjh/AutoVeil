@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.nexus.manager.data.bridge.FileBridge
 import com.nexus.manager.data.model.ModuleUi
 import com.nexus.manager.ui.components.GlassCard
@@ -89,11 +90,16 @@ fun ModulesPage(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
-            val path = FileBridge.copyUriToTemp(context, uri)
-            if (path != null) {
-                viewModel.installFromZip(path)
-            } else {
-                android.widget.Toast.makeText(context, "无法读取 ZIP 文件", android.widget.Toast.LENGTH_SHORT).show()
+            // 整改 B2：FileBridge.copyUriToTemp 改为 suspend，必须在协程中调用。
+            // 整改 B9：用全局 LocalSnackbar 替代 Toast，保持 UX 一致。
+            val snackbar = com.nexus.manager.ui.components.LocalSnackbar.current
+            kotlinx.coroutines.MainScope().launch {
+                val path = FileBridge.copyUriToTemp(context, uri)
+                if (path != null) {
+                    viewModel.installFromZip(path)
+                } else {
+                    snackbar.show("无法读取 ZIP 文件（可能过大或路径无效）")
+                }
             }
         }
     }
