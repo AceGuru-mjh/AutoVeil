@@ -201,7 +201,6 @@ nexus_<id>_<version>.zip
 | `NEXUS_ARCH` | `arm64` |
 | `NEXUS_OVERLAY_BASE` | `/data/adb/nexuscore/overlay` |
 | `NEXUS_TMPDIR` | `/data/adb/nexuscore/tmp/my_module` |
-| `MODPATH`（兼容别名） | 等价于 `NEXUS_MODULE_PATH` |
 
 ---
 
@@ -246,7 +245,7 @@ adb shell cat /proc/mounts | grep nexus
 | 脚本在 `post-fs-data` 访问网络 | 此阶段网络未就绪，放到 `service.sh` |
 | `service.sh` 修改的文件重启后消失 | `service.sh` 在独立 Mount NS，写入会随进程退出丢失。持久化写到 `/data/adb/nexuscore/<id>/` |
 | 多模块覆盖同一文件冲突 | 用 `priority` 调整顺序；Phase 3 后用事件总线 |
-| `customize.sh` 里 `$MODPATH` 为空 | 必须由 Daemon 调用，不要手动执行 |
+| `customize.sh` 里 `$NEXUS_MODULE_PATH` 为空 | 必须由 Daemon 调用，不要手动执行 |
 | 模块"安装成功但什么都没做" | 检查 `capabilities` 是否声明完整，看日志 `CAPABILITY_DENIED` |
 | EROFS 设备 `/system/x` 不存在 | bind mount 无法在 EROFS 上创建新文件，Daemon 会跳过并告警 |
 
@@ -285,6 +284,52 @@ adb shell cat /proc/mounts | grep nexus
 - [ ] 在 Android 14/15 真机验证至少 3 次冷启动无异常
 - [ ] 打包后 `unzip -l` 检查文件结构
 - [ ] （推荐）`META-INF/nexus_signature` 签名（Phase 2 强制）
+
+---
+
+## 13. 从 Magisk 模块迁移
+
+NexusCore 采用自有命名体系（`NEXUS_` 前缀变量、`nexus_` 前缀函数），**不内置 Magisk 兼容层**。迁移时可参考以下步骤：
+
+### 13.1 清单文件迁移
+
+| Magisk | NexusCore |
+|---|---|
+| `module.prop` | `manifest.json` |
+| `id` | `id` |
+| `name` | `name` |
+| `version` / `versionCode` | `version` / `versionCode` |
+| `author` | `author` |
+| `description` | `description` |
+| （无对应） | `capabilities`（必须声明） |
+| （无对应） | `priority`（模块加载顺序） |
+| （无对应） | `min_nexus_version` |
+
+### 13.2 环境变量/函数迁移
+
+| Magisk | NexusCore |
+|---|---|
+| `$MODPATH` | `$NEXUS_MODULE_PATH` |
+| `$TMPDIR` | `$NEXUS_TMPDIR` |
+| `$API` | `$NEXUS_API_LEVEL` |
+| `ui_print` | `nexus_log` |
+| `abort` | `nexus_abort` |
+| `set_perm` | `nexus_set_perm` |
+| `set_perm_recursive` | `nexus_set_perm_recursive` |
+| `SKIPUNZIP` | （不适用，NexusCore 统一解压） |
+
+### 13.3 快速替换命令
+
+```bash
+# 在模块目录下执行
+sed -i 's/\$MODPATH/\$NEXUS_MODULE_PATH/g' *.sh
+sed -i 's/ui_print /nexus_log /g' *.sh
+sed -i 's/abort /nexus_abort /g' *.sh
+sed -i 's/set_perm /nexus_set_perm /g' *.sh
+sed -i 's/set_perm_recursive /nexus_set_perm_recursive /g' *.sh
+```
+
+> 注意：`system.prop`、`sepolicy.rule`、`zygisk/` 等 Magisk 特有机制在 NexusCore 中不适用。属性修改请通过 `customize.sh` + `system/build.prop` 覆盖实现。
 
 ---
 

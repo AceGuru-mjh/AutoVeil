@@ -243,6 +243,31 @@ Daemon 在解析时使用 C++ 内嵌的轻量校验（`nlohmann::json` + 手写�
 
 脚本 `stdout` / `stderr` 被 Daemon 重定向到 `/data/adb/nexuscore/logs/<id>.log`，同时通过 `EVENT_SCRIPT_DONE` 事件广播给订阅者（Manager Logs 页可看到）。
 
+### 5.5 Magisk 模块迁移对照表
+
+NexusCore 不内嵌 Magisk 兼容层，也不注入 Magisk 风格的变量/函数。从 Magisk 模块迁移时可参考下表：
+
+| Magisk | NexusCore 对应 | 说明 |
+|---|---|---|
+| `$MODPATH` | `$NEXUS_MODULE_PATH` | 模块安装目录绝对路径 |
+| `$TMPDIR` | `$NEXUS_TMPDIR` | 模块临时目录 |
+| `$ZIPFILE` | （不提供） | 安装时不暴露原始 ZIP 路径 |
+| `$API` | `$NEXUS_API_LEVEL` | Android API 等级 |
+| `ui_print` | `nexus_log` | 输出日志 |
+| `abort` | `nexus_abort` | 终止并报错 |
+| `set_perm` | `nexus_set_perm` | 设置单文件权限 |
+| `set_perm_recursive` | `nexus_set_perm_recursive` | 递归设置目录权限 |
+| `SKIPUNZIP` | （不适用） | NexusCore 统一解压，模块无需关心 |
+| `service.sh` | `service.sh` | 开机后执行，命名一致 |
+| `post-fs-data.sh` | `post-fs-data.sh` | 早期执行，命名一致 |
+| `uninstall.sh` | `uninstall.sh` | 卸载钩子，命名一致 |
+| `module.prop` | `manifest.json` | 模块清单格式不同（DMM 规范） |
+| `sepolicy.rule` | （不提供） | NexusCore 不允许模块直接注入 sepolicy |
+| `system.prop` | `system/build.prop`（由 customize.sh 生成） | 属性修改方式不同 |
+| `zygisk/` | （不适用） | NexusCore 不提供 Zygisk 兼容 |
+
+> 迁移建议：用 `sed` 批量替换 `MODPATH→NEXUS_MODULE_PATH`、`ui_print→nexus_log`、`abort→nexus_abort`，并将 `module.prop` 改写为 `manifest.json`。
+
 ---
 
 ## 6. NexusProp Editor 示例模块
@@ -300,14 +325,29 @@ modules/nexus_prop_editor/
 #!/system/bin/sh
 # NexusProp Editor 安装脚本
 # 读取真实 /system/build.prop，生成修改版放入模块 system/ 目录
+#
+# NexusCore 自有环境变量：
+#   NEXUS_MODULE_PATH   — 模块安装目录绝对路径
+#   NEXUS_MODULE_ID     — 模块 ID
+#   NEXUS_MODULE_VERSION— 模块版本
+#   NEXUS_BOOT_STAGE    — 当前阶段
+#   NEXUS_ROOT_PROVIDER — Root 来源
+#   NEXUS_API_LEVEL     — Android API 等级
+#   NEXUS_ARCH          — 设备架构
+#
+# 工具函数（NexusCore 注入，模块可直接调用）：
+#   nexus_log <msg>     — 输出日志
+#   nexus_abort <msg>   — 终止并报错
+#   nexus_set_perm <path> <uid> <gid> <mode>
+#   nexus_set_perm_recursive <dir> <uid> <gid> <dmode> <fmode>
 
-SKIPUNZIP=0
+set -e
 
-ui_print "- NexusProp Editor 安装开始"
-ui_print "- 模块路径: $NEXUS_MODULE_PATH"
+nexus_log "NexusProp Editor 安装开始"
+nexus_log "模块路径: $NEXUS_MODULE_PATH"
 
-PROP_FILE="$MODPATH/system/build.prop"
-mkdir -p "$MODPATH/system"
+PROP_FILE="$NEXUS_MODULE_PATH/system/build.prop"
+mkdir -p "$NEXUS_MODULE_PATH/system"
 
 # ====== 用户配置（可在此处编辑） ======
 SET_DEBUGGABLE=0      # 1=可调试，0=不可调试（推荐 0 保持安全）
@@ -315,20 +355,19 @@ SET_SECURE=1          # 1=安全，0=不安全（推荐 1）
 # ====================================
 
 if [ ! -f "/system/build.prop" ]; then
-    ui_print "! /system/build.prop 不存在，可能为动态分区设备"
-    ui_print "! 尝试从 /system_root/system/build.prop 读取"
+    nexus_log "/system/build.prop 不存在，可能为动态分区设备"
+    nexus_log "尝试从 /system_root/system/build.prop 读取"
     SRC_PROP="/system_root/system/build.prop"
 else
     SRC_PROP="/system/build.prop"
 fi
 
 if [ ! -f "$SRC_PROP" ]; then
-    ui_print "! 无法定位 build.prop，安装中止"
-    abort "build.prop not found"
+    nexus_abort "无法定位 build.prop，安装中止"
 fi
 
-ui_print "- 源文件: $SRC_PROP"
-ui_print "- 目标值: ro.debuggable=$SET_DEBUGGABLE, ro.secure=$SET_SECURE"
+nexus_log "源文件: $SRC_PROP"
+nexus_log "目标值: ro.debuggable=$SET_DEBUGGABLE, ro.secure=$SET_SECURE"
 
 # 复制原始 build.prop
 cp "$SRC_PROP" "$PROP_FILE"
@@ -348,22 +387,22 @@ else
     echo "ro.secure=$SET_SECURE" >> "$PROP_FILE"
 fi
 
-ui_print "- 修改完成"
-ui_print "- 文件大小: $(wc -c < "$PROP_FILE") bytes"
+nexus_log "修改完成"
+nexus_log "文件大小: $(wc -c < "$PROP_FILE") bytes"
 
-# 记录安装日志（写入模块目录，service.sh 启动后会上报）
+# 记录安装日志
 {
     echo "$(date) installed by NexusCore"
     echo "  source: $SRC_PROP"
     echo "  ro.debuggable=$SET_DEBUGGABLE"
     echo "  ro.secure=$SET_SECURE"
-} > "$MODPATH/install.log"
+} > "$NEXUS_MODULE_PATH/install.log"
 
-ui_print "- 重启后生效"
-set_perm_recursive "$MODPATH/system" 0 0 0755 0644
+nexus_log "重启后生效"
+nexus_set_perm_recursive "$NEXUS_MODULE_PATH/system" 0 0 0755 0644
 ```
 
-> **说明**：`MODPATH` 等变量是 NexusCore 在执行 `customize.sh` 时注入的别名，等价于 `$NEXUS_MODULE_PATH`。为兼容 Magisk 习惯，Daemon 也注入 `MODPATH`、`TMPDIR`、`ZIPFILE`。
+> **说明**：NexusCore 使用 `NEXUS_` 前缀的自有环境变量与 `nexus_` 前缀的工具函数，不兼容 Magisk 的 `MODPATH` / `ui_print` / `abort` 等命名。详见下方迁移对照表。
 
 ### 6.5 `post-fs-data.sh`（早期执行）
 
@@ -581,7 +620,7 @@ unzip -l "$OUT"
 | 脚本在 `post-fs-data` 阶段访问网络 | 此阶段网络未就绪，放到 `service.sh` |
 | `service.sh` 修改的文件重启后消失 | `service.sh` 在独立 Mount NS，写入会随进程退出丢失。持久化数据写到 `/data/adb/nexuscore/<id>/` |
 | 多个模块覆盖同一文件冲突 | 用 `priority` 调整顺序；Phase 3 后用事件总线 |
-| `customize.sh` 里 `$MODPATH` 为空 | 必须由 Daemon 调用，不要手动执行 |
+| `customize.sh` 里 `$NEXUS_MODULE_PATH` 为空 | 必须由 Daemon 调用，不要手动执行 |
 
 ### 7.6 升级到 Phase 4 Agent 模块
 
@@ -641,7 +680,7 @@ unzip -l "$OUT"
 
 | 风险 | 缓解 |
 |---|---|
-| `customize.sh` 误改 `/system` 真实文件 | customize 在共享 NS 但脚本写入路径限定为 `$MODPATH`；越界写操作由 SELinux 拦截 |
+| `customize.sh` 误改 `/system` 真实文件 | customize 在共享 NS 但脚本写入路径限定为 `$NEXUS_MODULE_PATH`；越界写操作由 SELinux 拦截 |
 | `priority` 设置不当导致覆盖链错乱 | 文档明确约定范围；Phase 3 事件总线解决根本问题 |
 | 第三方模块带恶意 `service.sh` | MVP 信任签名（`META-INF/nexus_signature`，Phase 2 强制）；Manager 显示 capabilities 警告 |
 | `build.prop` 在 EROFS 设备上不可 bind | Daemon 检测目标存在性，不存在则跳过并告警（Spec 01 §6.5） |

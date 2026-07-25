@@ -1,32 +1,28 @@
 #!/usr/bin/env bash
-# 打包 NexusProp Editor 模块 ZIP
+# NexusProp Editor — 本地打包脚本
+# 输出 dist/nexus_nexus_prop_editor_<VERSION>.zip
+
 set -euo pipefail
 
-MODULE_ID="nexus_prop_editor"
-VERSION="1.0.0"
-OUT_DIR="dist"
-OUT="$OUT_DIR/nexus_${MODULE_ID}_${VERSION}.zip"
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODULE_DIR="$SCRIPT_DIR"
+DIST_DIR="$SCRIPT_DIR/../dist"
+VERSION="1.0.0"
+MODULE_ID="nexus_prop_editor"
 
-rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR"
+mkdir -p "$DIST_DIR"
 
-TMP="$(mktemp -d)"
-trap "rm -rf $TMP" EXIT
+OUTPUT="$DIST_DIR/nexus_${MODULE_ID}_${VERSION}.zip"
 
-cp -r "$MODULE_DIR"/* "$TMP/" 2>/dev/null || true
-rm -rf "$TMP/dist" "$TMP/build.sh"
+cd "$MODULE_DIR"
+zip -r "$OUTPUT" \
+    manifest.json \
+    customize.sh \
+    post-fs-data.sh \
+    service.sh \
+    uninstall.sh \
+    verify.sh \
+    README.md 2>/dev/null || true
 
-if [ ! -f "$TMP/manifest.json" ]; then
-    echo "! manifest.json missing" >&2
-    exit 1
-fi
-
-chmod +x "$TMP"/*.sh 2>/dev/null || true
-
-( cd "$TMP" && zip -r9 "$OLDPWD/$OUT" . -x "*.DS_Store" "*/.git*" )
-
-echo "Built: $OUT"
-unzip -l "$OUT"
+echo "打包完成: $OUTPUT"
+echo "大小: $(du -h "$OUTPUT" | cut -f1)"

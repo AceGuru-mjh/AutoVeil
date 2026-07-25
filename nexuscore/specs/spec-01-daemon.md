@@ -1160,17 +1160,36 @@ Result<void> SELinuxManager::patchSelfDomain() {
     //    - allow nexus_daemon nexus_data_t:dir { search read write };
     // 3) 写回 /sys/fs/selinux/load
     // 4) 验证 /sys/fs/selinux/enforce 仍为 1
+    // SELinux 修补降级策略（四级，绝不主动全局 setenforce 0）：
+    //   1. libsepol 注入（首选，自有实现）
+    //   2. NexusCore 精简 sepolicy-inject（自研，不依赖外部库）
+    //   3. 调用系统已有 magiskpolicy 二进制（仅当 /data/adb/magisk/magiskpolicy 存在时）
+    //      —— 注意：不复制 / 静态链接 magiskpolicy 源码，仅作为外部工具调用
+    //   4. 仅对 nexus_daemon 域设为 permissive（内核支持时）
+    //   5. 最后兜底：setenforce 0 + 严重告警（用户可见）
     if (auto r = injectViaLibsepol(); !r) {
-        NX_LOG_WARN("SELinux", "libsepol inject failed (err=%d); trying magiskpolicy", (int)r.error());
-        if (auto r2 = invokeMagiskPolicy(); !r2) {
-            NX_LOG_ERR("SELinux", "all patch methods failed; fallback to setenforce 0 (DANGEROUS)");
-            // 兜底：仅 patchself 时局部 permissive（如果内核支持），否则 setenforce 0 + 告警
-            if (!tryPermissiveDomain("nexus_daemon")) {
-                ::system("setenforce 0");
-                fallbackEnforce0_ = true;
-                NX_LOG_ERR("SELinux", "GLOBAL SETENFORCE 0 ENGAGED - system services may misbehave");
+        NX_LOG_WARN("SELinux", "libsepol inject failed (err=%d); trying built-in inject", (int)r.error());
+        if (auto r2 = injectBuiltin(); !r2) {
+            NX_LOG_WARN("SELinux", "built-in inject failed; checking external magiskpolicy");
+            // 仅当用户系统已存在 magiskpolicy 时才调用（作为外部工具，不内嵌其源码）
+            if (access("/data/adb/magisk/magiskpolicy", X_OK) == 0) {
+                NX_LOG_INFO("SELinux", "found external magiskpolicy; invoking as fallback");
+                if (auto r3 = invokeExternalMagiskpolicy(); !r3) {
+                    NX_LOG_ERR("SELinux", "external magiskpolicy failed; trying permissive domain");
+                    if (!tryPermissiveDomain("nexus_daemon")) {
+                        ::system("setenforce 0");
+                        fallbackEnforce0_ = true;
+                        NX_LOG_ERR("SELinux", "GLOBAL SETENFORCE 0 ENGAGED - system services may misbehave");
+                    }
+                }
+            } else {
+                if (!tryPermissiveDomain("nexus_daemon")) {
+                    ::system("setenforce 0");
+                    fallbackEnforce0_ = true;
+                    NX_LOG_ERR("SELinux", "GLOBAL SETENFORCE 0 ENGAGED - system services may misbehave");
+                }
             }
-            return std::unexpected(r.error());
+            return std::unexpected(r2.error());
         }
     }
     patched_ = true;
