@@ -246,6 +246,7 @@
   .phase .status{font-family:var(--mono);font-size:11px;color:var(--text-mute);margin-top:8px}
   .phase .status.done{color:var(--success)}
   .phase .status.next{color:var(--accent)}
+  .phase .status.wip{color:var(--warn)}
   .phase .status.risk{color:var(--danger)}
 
   /* ============ Optimizations ============ */
@@ -644,13 +645,13 @@
       <p>"MVP 验证核心 → 架构预留插槽 → 逐步注入超纲功能" 的渐进策略。每个 Phase 有明确触发条件，避免过度工程。</p>
     </div>
     <div class="roadmap reveal d1">
-      <div class="phase done" data-phase="1">
+      <div class="phase" data-phase="1">
         <div class="phase-head">
           <span class="phase-tag">PHASE 1</span>
           <h3>MVP · 四层架构闭环</h3>
         </div>
-        <p>Daemon + Manager + 示例模块（NexusProp Editor）。OverlayFS/Bind 挂载、SELinux 内存修补、SO_PEERCRED IPC、声明式清单。</p>
-        <div class="status done">● 已完成 · 工程落地成功率 90%+</div>
+        <p>Daemon + Manager + 示例模块（NexusProp Editor / NexusHosts Editor）。OverlayFS/Bind 挂载、SELinux 内存修补、SO_PEERCRED IPC、声明式清单。</p>
+        <div class="status wip">● 实现中 · Manager UI 完成，Daemon 已有 MVP 骨架，RPC handlers 仍为占位</div>
       </div>
       <div class="phase" data-phase="2">
         <div class="phase-head">
