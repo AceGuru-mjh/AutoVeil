@@ -1,4 +1,6 @@
 import com.google.protobuf.gradle.id
+import java.io.File
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -35,7 +37,7 @@ android {
             // 改为：通过 local.properties 读取 release keystore 路径与密码（不入库）；
             //       未配置时回退到 debug key 并打 warning，方便 CI 与本地未配置开发者继续构建。
             signingConfig = run {
-                val props = java.util.Properties()
+                val props = Properties()
                 val localProps = rootProject.file("local.properties")
                 if (localProps.exists()) {
                     localProps.inputStream().use { props.load(it) }
