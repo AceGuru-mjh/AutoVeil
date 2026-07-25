@@ -42,7 +42,10 @@ jobs:
 
       - name: Build tests
         working-directory: nexuscore/daemon
-        run: cmake --build build-host -j
+        run: |
+          # host 平台只构建测试可执行文件，不构建 nexusd/su/nexuspolicy
+          # （它们需要 Android 系统库 log/cutils）
+          cmake --build build-host -j --target test_codec test_util test_module_loader test_event_bus test_script_executor test_boot_patcher test_magisk_compat test_su_daemon
 
       - name: Run unit tests
         working-directory: nexuscore/daemon
