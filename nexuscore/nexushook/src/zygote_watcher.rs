@@ -19,10 +19,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::ptrace_injector::PtraceInjector;
-use crate::hook_table::{HookTable, HookEntry};
 use crate::companion::CompanionManager;
 use crate::denylist::DenyList;
+use crate::hook_table::{HookEntry, HookTable};
+use crate::ptrace_injector::PtraceInjector;
 use crate::util;
 
 /// Zygote 监听器
@@ -66,23 +66,23 @@ impl ZygoteWatcher {
                 continue;
             }
             match std::fs::read_to_string(&hook_toml) {
-                Ok(content) => {
-                    match HookTable::parse_toml(&content) {
-                        Ok(table) => {
-                            let warnings = table.validate();
-                            if warnings.is_empty() {
-                                let count = table.entries.len();
-                                self.hook_modules.push((module_id.clone(), table, so_path));
-                                eprintln!("[nexushook] loaded module {} ({} hooks)",
-                                          module_id, count);
-                            } else {
-                                eprintln!("[nexushook] skip module {}: {} warnings",
-                                          module_id, warnings.len());
-                            }
+                Ok(content) => match HookTable::parse_toml(&content) {
+                    Ok(table) => {
+                        let warnings = table.validate();
+                        if warnings.is_empty() {
+                            let count = table.entries.len();
+                            self.hook_modules.push((module_id.clone(), table, so_path));
+                            eprintln!("[nexushook] loaded module {} ({} hooks)", module_id, count);
+                        } else {
+                            eprintln!(
+                                "[nexushook] skip module {}: {} warnings",
+                                module_id,
+                                warnings.len()
+                            );
                         }
-                        Err(e) => eprintln!("[nexushook] parse error for {}: {}", module_id, e),
                     }
-                }
+                    Err(e) => eprintln!("[nexushook] parse error for {}: {}", module_id, e),
+                },
                 Err(e) => eprintln!("[nexushook] read error for {}: {}", module_id, e),
             }
         }
@@ -96,7 +96,8 @@ impl ZygoteWatcher {
     /// 3. 设置 tracefork 选项
     /// 4. 主循环：监听 fork 事件
     pub fn start(&self, zygote_pid: i32) -> std::io::Result<()> {
-        self.running.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
 
         eprintln!("[nexushook] attaching to zygote pid={}", zygote_pid);
         let injector = PtraceInjector::attach(zygote_pid)?;
@@ -131,7 +132,8 @@ impl ZygoteWatcher {
 
     /// 停止监听
     pub fn stop(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// 处理 fork 出的子进程
@@ -160,11 +162,13 @@ impl ZygoteWatcher {
         }
 
         // 查找匹配的 hook 模块
-        for (module_id, hook_table, so_path) in &self.hook_modules {
+        for (module_id, _hook_table, so_path) in &self.hook_modules {
             // 模块加载到 zygote 的所有子进程（除非在 denylist）
             // 实际生产应支持模块过滤（只 hook 特定包名）
-            eprintln!("[nexushook] injecting module {} into pid={} pkg={}",
-                      module_id, child_pid, package);
+            eprintln!(
+                "[nexushook] injecting module {} into pid={} pkg={}",
+                module_id, child_pid, package
+            );
 
             // 注入 .so 到子进程
             match self.inject_so_into_child(child_pid, so_path, module_id) {
@@ -172,8 +176,10 @@ impl ZygoteWatcher {
                     eprintln!("[nexushook] injected {} handle=0x{:x}", module_id, handle);
                     // 启动 companion 进程
                     if let Err(e) = self.companions.start(module_id, so_path.clone()) {
-                        eprintln!("[nexushook] start companion for {} failed: {}",
-                                  module_id, e);
+                        eprintln!(
+                            "[nexushook] start companion for {} failed: {}",
+                            module_id, e
+                        );
                     }
                 }
                 Err(e) => {
@@ -186,9 +192,12 @@ impl ZygoteWatcher {
     }
 
     /// 通过 ptrace 在子进程内调用 dlopen 加载 .so
-    fn inject_so_into_child(&self, child_pid: i32, so_path: &Path, _module_id: &str)
-        -> std::io::Result<u64>
-    {
+    fn inject_so_into_child(
+        &self,
+        child_pid: i32,
+        so_path: &Path,
+        _module_id: &str,
+    ) -> std::io::Result<u64> {
         // 子进程已 STOP（被 PTRACE_O_TRACEFORK 触发）
         let injector = PtraceInjector::attach(child_pid)?;
         let so_path_str = so_path.to_string_lossy().to_string();
@@ -230,7 +239,12 @@ fn set_trace_options(pid: i32) -> std::io::Result<()> {
     // PTRACE_O_TRACEEXEC = 1 << 4 = 16
     let options: u64 = 2 | 4 | 8 | 16;
     let r = unsafe {
-        ptrace(0x4200 /* PTRACE_SETOPTIONS */, pid, 0, options as *mut _)
+        do_ptrace(
+            0x4200, /* PTRACE_SETOPTIONS */
+            pid,
+            std::ptr::null_mut(),
+            options as *mut _,
+        )
     };
     if r < 0 {
         return Err(std::io::Error::last_os_error());
@@ -241,10 +255,13 @@ fn set_trace_options(pid: i32) -> std::io::Result<()> {
 /// 等待任意子进程停止
 fn wait_for_any_child(pid: i32) -> std::io::Result<Option<i32>> {
     let mut status: i32 = 0;
-    let r = unsafe { waitpid(-1, &mut status, 1 /* WNOHANG */) };
+    let r = unsafe {
+        do_waitpid(-1, &mut status, 1 /* WNOHANG */)
+    };
     if r < 0 {
         let err = std::io::Error::last_os_error();
-        if err.kind() == std::io::ErrorKind::ChildProcessNotFound {
+        // ECHILD (10): no child to wait for
+        if err.raw_os_error() == Some(10) {
             return Ok(None);
         }
         return Err(err);
@@ -270,14 +287,16 @@ fn read_process_uid(pid: i32) -> std::io::Result<u32> {
         if line.starts_with("Uid:") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
-                return parts[1].parse().map_err(|_| std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "invalid uid",
-                ));
+                return parts[1].parse().map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid uid")
+                });
             }
         }
     }
-    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Uid line not found"))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "Uid line not found",
+    ))
 }
 
 /// 查找 unshare 符号地址（在 libc.so 中）
@@ -297,8 +316,13 @@ extern "C" {
     fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
 }
 
-unsafe fn ptrace(request: i32, pid: i32, addr: *mut libc_void, data: *mut libc_void) -> i64 {
-    ptrace(request, pid, addr, data)
+/// Phase 1 修复：重命名 wrapper 避免与 extern fn 同名冲突
+unsafe fn do_ptrace(request: i32, pid: i32, addr: *mut libc_void, data: *mut libc_void) -> i64 {
+    unsafe { ptrace(request, pid, addr, data) }
+}
+
+unsafe fn do_waitpid(pid: i32, status: *mut i32, options: i32) -> i32 {
+    unsafe { waitpid(pid, status, options) }
 }
 
 #[cfg(test)]

@@ -186,20 +186,50 @@ Result<std::vector<uint8_t>> BootPatcher::extractRamdisk(const BootImageInfo& in
         return {unexpect, Err::IoError};
     }
 
-    // 计算 ramdisk 偏移
-    // 对于 v0-v2：header_size + kernel_size（按 page 对齐）
-    // 对于 v3+：header + kernel
-    // 对于 vendor_boot：header + vendor_ramdisk（位置不同）
+    // Phase 2 完善：准确的 ramdisk 偏移计算
+    //
+    // Android Boot Image 布局（按 page 对齐）：
+    //
+    // v0-v2 (legacy):
+    //   [header (1 page)] [kernel (N pages)] [ramdisk (M pages)] [second (K pages)] [recovery_dtbo (L pages)]
+    //   ramdisk_offset = (1 + ceil(kernel_size / page_size)) * page_size
+    //
+    // v3-v4 (GKI):
+    //   [header (1 page)] [kernel (N pages)] [ramdisk (M pages)]
+    //   ramdisk_offset = (1 + ceil(kernel_size / page_size)) * page_size
+    //   注意：v3+ 没有 second_size 与 recovery_dtbo
+    //
+    // vendor_boot v3-v4:
+    //   [header (1 page)] [vendor_ramdisk (M pages)] [dtb (L pages)]
+    //   ramdisk_offset = 1 * page_size (header 后立即是 vendor_ramdisk)
+    //
+    // page 对齐计算：ceil(size / page_size) * page_size
+
     size_t ramdiskOffset = 0;
+    auto pageAlign = [&](size_t size) -> size_t {
+        return ((size + info.pageSize - 1) / info.pageSize) * info.pageSize;
+    };
+
     if (info.isVendorBoot) {
-        // vendor_boot: header + dtb（如果有）+ vendor_ramdisk
-        // 简化：vendor_boot v3 的 ramdisk 在 header 后
-        ramdiskOffset = info.pageSize;   // page-aligned header
+        // vendor_boot v3-v4:
+        // header 占 1 page（page 对齐后），后接 vendor_ramdisk
+        ramdiskOffset = pageAlign(sizeof(VendorBootHeaderV3));
+        NX_LOG_I("BootPatcher", "vendor_boot ramdisk offset: %zu (header=%zu)",
+                 ramdiskOffset, sizeof(VendorBootHeaderV3));
+    } else if (info.headerVersion >= 3) {
+        // v3-v4: header + kernel
+        size_t headerSize = pageAlign(sizeof(BootImageHeaderV3));
+        size_t kernelSize = pageAlign(info.kernelSize);
+        ramdiskOffset = headerSize + kernelSize;
+        NX_LOG_I("BootPatcher", "v3+ ramdisk offset: %zu (header=%zu kernel=%zu)",
+                 ramdiskOffset, headerSize, kernelSize);
     } else {
-        // 普通_boot：page + kernel (page-aligned)
+        // v0-v2: header (1 page) + kernel + ramdisk
         size_t headerPages = 1;
         size_t kernelPages = (info.kernelSize + info.pageSize - 1) / info.pageSize;
         ramdiskOffset = (headerPages + kernelPages) * info.pageSize;
+        NX_LOG_I("BootPatcher", "v0-v2 ramdisk offset: %zu (header=%zu pages kernel=%zu pages)",
+                 ramdiskOffset, headerPages, kernelPages);
     }
 
     if (ramdiskOffset + info.ramdiskSize > content->size()) {
@@ -211,6 +241,8 @@ Result<std::vector<uint8_t>> BootPatcher::extractRamdisk(const BootImageInfo& in
     std::vector<uint8_t> ramdisk(
         content->begin() + ramdiskOffset,
         content->begin() + ramdiskOffset + info.ramdiskSize);
+    NX_LOG_I("BootPatcher", "extracted ramdisk: %zu bytes from offset %zu",
+             ramdisk.size(), ramdiskOffset);
     return ramdisk;
 }
 
@@ -361,12 +393,16 @@ Result<std::vector<uint8_t>> BootPatcher::repackImage(
     // Phase 1 修复：readFile 返回 string，需用迭代器构造 vector
     std::vector<uint8_t> out(content->begin(), content->end());
 
-    // 更新 ramdisk 内容
-    // 简化：找到 ramdisk 偏移，替换为新 ramdisk
-    // 实际生产需要重新计算 page 对齐 + 更新 header 中的 ramdiskSize
+    // Phase 2 完善：与 extractRamdisk 一致的偏移计算
     size_t ramdiskOffset = 0;
+    auto pageAlign = [&](size_t size) -> size_t {
+        return ((size + info.pageSize - 1) / info.pageSize) * info.pageSize;
+    };
+
     if (info.isVendorBoot) {
-        ramdiskOffset = info.pageSize;
+        ramdiskOffset = pageAlign(sizeof(VendorBootHeaderV3));
+    } else if (info.headerVersion >= 3) {
+        ramdiskOffset = pageAlign(sizeof(BootImageHeaderV3)) + pageAlign(info.kernelSize);
     } else {
         size_t headerPages = 1;
         size_t kernelPages = (info.kernelSize + info.pageSize - 1) / info.pageSize;
@@ -375,16 +411,34 @@ Result<std::vector<uint8_t>> BootPatcher::repackImage(
 
     // 替换 ramdisk 段
     if (ramdiskOffset + info.ramdiskSize > out.size()) {
+        NX_LOG_E("BootPatcher", "repack: ramdisk out of bounds: offset=%zu size=%u total=%zu",
+                 ramdiskOffset, info.ramdiskSize, out.size());
         return {unexpect, Err::InvalidArg};
     }
 
-    // 删除旧 ramdisk
-    out.erase(out.begin() + ramdiskOffset,
-              out.begin() + ramdiskOffset + info.ramdiskSize);
+    // 计算旧 ramdisk 占用的 page 数（用于后续段偏移调整）
+    size_t oldRamdiskPages = (info.ramdiskSize + info.pageSize - 1) / info.pageSize;
+    size_t oldRamdiskAligned = oldRamdiskPages * info.pageSize;
+    // 新 ramdisk 占用的 page 数
+    size_t newRamdiskPages = (newRamdisk.size() + info.pageSize - 1) / info.pageSize;
+    size_t newRamdiskAligned = newRamdiskPages * info.pageSize;
+    // 大小差异（page 对齐后）
+    int64_t sizeDiff = (int64_t)newRamdiskAligned - (int64_t)oldRamdiskAligned;
 
-    // 插入新 ramdisk
+    NX_LOG_I("BootPatcher", "repack: old_ramdisk=%u (%zu pages), new_ramdisk=%zu (%zu pages), diff=%lld",
+             info.ramdiskSize, oldRamdiskPages, newRamdisk.size(), newRamdiskPages,
+             (long long)sizeDiff);
+
+    // 删除旧 ramdisk（包括 padding）
+    out.erase(out.begin() + ramdiskOffset,
+              out.begin() + ramdiskOffset + oldRamdiskAligned);
+
+    // 插入新 ramdisk + padding 到 page 对齐
     out.insert(out.begin() + ramdiskOffset,
                newRamdisk.begin(), newRamdisk.end());
+    // 补 padding
+    size_t padding = newRamdiskAligned - newRamdisk.size();
+    out.insert(out.begin() + ramdiskOffset + newRamdisk.size(), padding, 0);
 
     // 更新 header 中的 ramdiskSize
     if (!info.isVendorBoot) {

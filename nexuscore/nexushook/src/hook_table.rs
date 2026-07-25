@@ -61,14 +61,9 @@ pub enum HookTarget {
         signature: String,
     },
     /// 指定 native 函数（用于 hook libart.so / libbinder.so 等）
-    NativeSymbol {
-        lib: String,
-        symbol: String,
-    },
+    NativeSymbol { lib: String, symbol: String },
     /// 系统属性读取（hook __system_property_get）
-    SystemProperty {
-        key_pattern: String,
-    },
+    SystemProperty { key_pattern: String },
 }
 
 /// 已解析的 hook 表
@@ -84,7 +79,6 @@ impl HookTable {
         // 生产可换 toml crate
         let mut entries = Vec::new();
         let mut current: Option<HookEntry> = None;
-        let mut current_params: HashMap<String, String> = HashMap::new();
 
         for (lineno, line) in content.lines().enumerate() {
             let trimmed = line.trim();
@@ -92,8 +86,10 @@ impl HookTable {
                 continue;
             }
             if trimmed == "[[hook]]" {
-                if let Some(mut e) = current.take() {
-                    e.params = std::mem::take(&mut current_params);
+                if let Some(e) = current.take() {
+                    // Phase 1 修复：原代码 e.params = std::mem::take(&mut current_params)
+                    // 会覆盖 entry 自己积累的 params（因为 _ => 分支已直接 insert 到 entry.params）
+                    // 移除这行，直接用 entry 自己的 params
                     entries.push(e);
                 }
                 current = Some(HookEntry {
@@ -110,7 +106,10 @@ impl HookTable {
                 let key = trimmed[..eq].trim();
                 let val = trimmed[eq + 1..].trim().trim_matches('"');
                 let entry = current.as_mut().ok_or_else(|| {
-                    HookTableError::Parse(format!("line {}: key=value outside [[hook]]", lineno + 1))
+                    HookTableError::Parse(format!(
+                        "line {}: key=value outside [[hook]]",
+                        lineno + 1
+                    ))
                 })?;
                 match key {
                     "target_class" => entry.target_class = val.to_string(),
@@ -141,11 +140,12 @@ impl HookTable {
                 continue;
             }
             return Err(HookTableError::Parse(format!(
-                "line {}: cannot parse: {}", lineno + 1, line
+                "line {}: cannot parse: {}",
+                lineno + 1,
+                line
             )));
         }
-        if let Some(mut e) = current {
-            e.params = current_params;
+        if let Some(e) = current {
             entries.push(e);
         }
         Ok(Self { entries })
@@ -173,9 +173,10 @@ impl HookTable {
 
     /// 查找匹配某个目标的 hook
     pub fn find_for_java_method(&self, class: &str, method: &str, sig: &str) -> Vec<&HookEntry> {
-        self.entries.iter().filter(|e| {
-            e.target_class == class && e.target_method == method && e.signature == sig
-        }).collect()
+        self.entries
+            .iter()
+            .filter(|e| e.target_class == class && e.target_method == method && e.signature == sig)
+            .collect()
     }
 }
 
@@ -253,8 +254,14 @@ fake_lat = "37.7749"
 fake_lng = "-122.4194"
 "#;
         let table = HookTable::parse_toml(toml).unwrap();
-        assert_eq!(table.entries[0].params.get("fake_lat"), Some(&"37.7749".to_string()));
-        assert_eq!(table.entries[0].params.get("fake_lng"), Some(&"-122.4194".to_string()));
+        assert_eq!(
+            table.entries[0].params.get("fake_lat"),
+            Some(&"37.7749".to_string())
+        );
+        assert_eq!(
+            table.entries[0].params.get("fake_lng"),
+            Some(&"-122.4194".to_string())
+        );
     }
 
     #[test]
@@ -267,7 +274,9 @@ target_method = ""
         let table = HookTable::parse_toml(toml).unwrap();
         let warnings = table.validate();
         assert!(warnings.iter().any(|w| w.contains("target_class is empty")));
-        assert!(warnings.iter().any(|w| w.contains("target_method is empty")));
+        assert!(warnings
+            .iter()
+            .any(|w| w.contains("target_method is empty")));
         assert!(warnings.iter().any(|w| w.contains("signature is empty")));
         assert!(warnings.iter().any(|w| w.contains("handler is empty")));
     }

@@ -135,7 +135,7 @@ extern "C" {
 }
 
 unsafe fn libc_unshare(flags: i32) -> i32 {
-    unshare(flags)
+    unsafe { unshare(flags) }
 }
 
 #[cfg(test)]

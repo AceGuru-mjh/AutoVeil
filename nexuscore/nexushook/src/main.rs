@@ -3,7 +3,7 @@
 //! 作为 init service 启动，attach 到 zygote，监听 fork 事件，
 //! 按需注入 hook 模块到 fork 出的子进程。
 
-use nexushook::{ZygoteWatcher, DenyList};
+use nexushook::{DenyList, ZygoteWatcher};
 use std::process;
 
 const HOOK_MODULES_DIR: &str = "/data/adb/nexuscore/hook_modules";
@@ -84,8 +84,7 @@ fn find_zygote_pid() -> Option<i32> {
     // 方法 1：扫描 /proc/*/comm 找 zygote64
     if let Ok(entries) = std::fs::read_dir("/proc") {
         for entry in entries.flatten() {
-            let pid: i32 = entry.file_name().to_string_lossy()
-                .parse().ok()?;
+            let pid: i32 = entry.file_name().to_string_lossy().parse().ok()?;
             let comm = std::fs::read_to_string(format!("/proc/{}/comm", pid)).ok()?;
             let comm = comm.trim();
             if comm == "zygote64" || comm == "main" {

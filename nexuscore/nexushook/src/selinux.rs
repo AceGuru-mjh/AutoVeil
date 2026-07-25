@@ -8,8 +8,7 @@ use std::io;
 
 /// 读取当前进程的 SELinux context
 pub fn current_context() -> io::Result<String> {
-    fs::read_to_string("/proc/self/attr/current")
-        .map(|s| s.trim().to_string())
+    fs::read_to_string("/proc/self/attr/current").map(|s| s.trim().to_string())
 }
 
 /// 读取 /sys/fs/selinux/enforce 判断是否 enforcing

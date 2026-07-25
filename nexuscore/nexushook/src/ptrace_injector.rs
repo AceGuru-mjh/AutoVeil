@@ -21,8 +21,8 @@
 //!
 //! arm64 调用约定：x0-x7 参数寄存器，x30 (LR) 返回地址，SP 栈指针
 
-use std::io;
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 
 // ptrace request 常量（Linux 通用，arm64 一致）
@@ -34,7 +34,7 @@ const PTRACE_KILL: i32 = 8;
 const PTRACE_SINGLESTEP: i32 = 9;
 const PTRACE_ATTACH: i32 = 16;
 const PTRACE_DETACH: i32 = 17;
-const PTRACE_GETREGS: i32 = 12;       // arm64 实际用 PTRACE_GETREGSET
+const PTRACE_GETREGS: i32 = 12; // arm64 实际用 PTRACE_GETREGSET
 const PTRACE_SETREGS: i32 = 13;
 const PTRACE_GETREGSET: i32 = 0x4204;
 const PTRACE_SETREGSET: i32 = 0x4205;
@@ -53,11 +53,18 @@ pub struct PtraceInjector {
 impl PtraceInjector {
     /// attach 到目标进程，等待 SIGSTOP
     pub fn attach(pid: i32) -> io::Result<Self> {
-        let r = unsafe { ptrace(PTRACE_ATTACH, pid, 0, 0) };
+        let r = unsafe {
+            do_ptrace(
+                PTRACE_ATTACH,
+                pid,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
         if r < 0 {
             return Err(io::Error::last_os_error());
         }
-        wait_for_stop(pid, 10_000)?;   // 最多等 10 秒
+        wait_for_stop(pid, 10_000)?; // 最多等 10 秒
         Ok(Self { target_pid: pid })
     }
 
@@ -72,9 +79,12 @@ impl PtraceInjector {
         iov.iov_len = std::mem::size_of::<UserRegs>();
 
         let r = unsafe {
-            ptrace(PTRACE_GETREGSET, self.target_pid,
-                   NT_PRSTATUS as *mut libc_void,
-                   &mut iov as *mut _ as *mut libc_void)
+            do_ptrace(
+                PTRACE_GETREGSET,
+                self.target_pid,
+                NT_PRSTATUS as *mut libc_void,
+                &mut iov as *mut _ as *mut libc_void,
+            )
         };
         if r < 0 {
             return Err(io::Error::last_os_error());
@@ -89,9 +99,12 @@ impl PtraceInjector {
             iov_len: std::mem::size_of::<UserRegs>(),
         };
         let r = unsafe {
-            ptrace(PTRACE_SETREGSET, self.target_pid,
-                   NT_PRSTATUS as *mut libc_void,
-                   &mut iov as *mut _ as *mut libc_void)
+            do_ptrace(
+                PTRACE_SETREGSET,
+                self.target_pid,
+                NT_PRSTATUS as *mut libc_void,
+                &mut iov as *mut _ as *mut libc_void,
+            )
         };
         if r < 0 {
             return Err(io::Error::last_os_error());
@@ -125,8 +138,14 @@ impl PtraceInjector {
         // 中间完整 word
         while offset + 8 <= data.len() {
             let word = u64::from_le_bytes([
-                data[offset], data[offset+1], data[offset+2], data[offset+3],
-                data[offset+4], data[offset+5], data[offset+6], data[offset+7],
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
             ]);
             self.write_word(current, word)?;
             current += 8;
@@ -186,9 +205,12 @@ impl PtraceInjector {
     /// 写单个 word（8 字节）
     fn write_word(&self, addr: u64, value: u64) -> io::Result<()> {
         let r = unsafe {
-            ptrace(PTRACE_POKEDATA, self.target_pid,
-                   addr as *mut libc_void,
-                   value as *mut libc_void)
+            do_ptrace(
+                PTRACE_POKEDATA,
+                self.target_pid,
+                addr as *mut libc_void,
+                value as *mut libc_void,
+            )
         };
         if r < 0 {
             return Err(io::Error::last_os_error());
@@ -199,8 +221,12 @@ impl PtraceInjector {
     /// 读单个 word（8 字节）
     fn read_word(&self, addr: u64) -> io::Result<u64> {
         let r = unsafe {
-            ptrace(PTRACE_PEEKDATA, self.target_pid,
-                   addr as *mut libc_void, 0)
+            do_ptrace(
+                PTRACE_PEEKDATA,
+                self.target_pid,
+                addr as *mut libc_void,
+                std::ptr::null_mut(),
+            )
         };
         if r == -1 {
             return Err(io::Error::last_os_error());
@@ -230,8 +256,8 @@ impl PtraceInjector {
         // 构造调用寄存器
         let mut call_regs = original_regs.clone();
         call_regs.pc = func_addr;
-        call_regs.lr = 0;   // 返回到地址 0 触发 SIGSEGV
-        // 设置参数
+        call_regs.x[30] = 0; // LR (x30) = 0 返回到地址 0 触发 SIGSEGV
+                             // 设置参数
         for (i, &arg) in args.iter().enumerate().take(8) {
             call_regs.x[i] = arg;
         }
@@ -242,7 +268,12 @@ impl PtraceInjector {
 
         // 继续，等待 SIGSEGV（LR=0 导致）
         let r = unsafe {
-            ptrace(PTRACE_CONT, self.target_pid, 0, 0)
+            do_ptrace(
+                PTRACE_CONT,
+                self.target_pid,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
         };
         if r < 0 {
             self.set_regs(&original_regs).ok();
@@ -312,7 +343,14 @@ impl PtraceInjector {
 
     /// 让目标进程继续运行
     pub fn cont(&self) -> io::Result<()> {
-        let r = unsafe { ptrace(PTRACE_CONT, self.target_pid, 0, 0) };
+        let r = unsafe {
+            do_ptrace(
+                PTRACE_CONT,
+                self.target_pid,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
         if r < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -321,7 +359,14 @@ impl PtraceInjector {
 
     /// 单步执行
     pub fn single_step(&self) -> io::Result<()> {
-        let r = unsafe { ptrace(PTRACE_SINGLESTEP, self.target_pid, 0, 0) };
+        let r = unsafe {
+            do_ptrace(
+                PTRACE_SINGLESTEP,
+                self.target_pid,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
         if r < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -331,7 +376,14 @@ impl PtraceInjector {
 
     /// detach 并让目标进程继续运行
     pub fn detach(self) -> io::Result<()> {
-        let r = unsafe { ptrace(PTRACE_DETACH, self.target_pid, 0, 0) };
+        let r = unsafe {
+            do_ptrace(
+                PTRACE_DETACH,
+                self.target_pid,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
         if r < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -340,7 +392,14 @@ impl PtraceInjector {
 
     /// kill 目标进程
     pub fn kill(&self) -> io::Result<()> {
-        let r = unsafe { ptrace(PTRACE_KILL, self.target_pid, 0, 0) };
+        let r = unsafe {
+            do_ptrace(
+                PTRACE_KILL,
+                self.target_pid,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
         if r < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -375,7 +434,9 @@ fn wait_for_stop(pid: i32, timeout_ms: u64) -> io::Result<i32> {
     let start = std::time::Instant::now();
     loop {
         let mut status: i32 = 0;
-        let r = unsafe { waitpid(pid, &mut status, 1 /* WNOHANG */) };
+        let r = unsafe {
+            do_waitpid(pid, &mut status, 1 /* WNOHANG */)
+        };
         if r < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -472,21 +533,27 @@ fn find_symbol_in_lib(pid: i32, lib_name: &str, symbol: &str) -> io::Result<u64>
             }
             // 找第一个可读段（r-xp 或 r--p）
             if parts[1].starts_with('r') && lib_base.is_none() {
-                lib_base = Some(u64::from_str_radix(addr_range[0], 16)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?);
+                lib_base = Some(
+                    u64::from_str_radix(addr_range[0], 16)
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?,
+                );
                 lib_path = Some(PathBuf::from(parts[5]));
             }
         }
     }
 
-    let base = lib_base.ok_or_else(|| io::Error::new(
-        io::ErrorKind::NotFound,
-        format!("{} not found in maps", lib_name),
-    ))?;
-    let path = lib_path.ok_or_else(|| io::Error::new(
-        io::ErrorKind::NotFound,
-        format!("{} path not found", lib_name),
-    ))?;
+    let base = lib_base.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} not found in maps", lib_name),
+        )
+    })?;
+    let path = lib_path.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} path not found", lib_name),
+        )
+    })?;
 
     // 解析 ELF 符号表
     let elf_data = fs::read(&path)?;
@@ -536,19 +603,25 @@ fn find_symbol_in_elf(elf: &[u8], symbol: &str) -> io::Result<u64> {
     let e_shstrndx = u16::from_le_bytes(elf[62..64].try_into().unwrap()) as usize;
 
     if e_shoff == 0 || e_shnum == 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "no section headers"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "no section headers",
+        ));
     }
 
     // 找 .dynsym 与 .dynstr 节
     let mut dynsym_off: Option<u64> = None;
     let mut dynsym_size: Option<u64> = None;
     let mut dynstr_off: Option<u64> = None;
-    let mut dynsym_entsize: u64 = 24;   // ELF64 Sym 大小
+    let mut dynsym_entsize: u64 = 24; // ELF64 Sym 大小
 
     // 先读 shstrtab 来识别节名
     let shstrtab_offset = e_shoff + (e_shstrndx * e_shentsize) as u64;
     if shstrtab_offset as usize + e_shentsize > elf.len() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "shstrtab header out of bounds"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "shstrtab header out of bounds",
+        ));
     }
     let shstrtab_sh = &elf[shstrtab_offset as usize..shstrtab_offset as usize + e_shentsize];
     let shstrtab_offset = u64::from_le_bytes(shstrtab_sh[24..32].try_into().unwrap());
@@ -570,28 +643,30 @@ fn find_symbol_in_elf(elf: &[u8], symbol: &str) -> io::Result<u64> {
         if name_start >= elf.len() {
             continue;
         }
-        let name_end = elf[name_start..].iter().position(|&b| b == 0)
+        let name_end = elf[name_start..]
+            .iter()
+            .position(|&b| b == 0)
             .map(|e| name_start + e)
             .unwrap_or(elf.len());
         let name = std::str::from_utf8(&elf[name_start..name_end]).unwrap_or("");
 
-        if name == ".dynsym" && sh_type == 11 {   // SHT_DYNSYM
+        if name == ".dynsym" && sh_type == 11 {
+            // SHT_DYNSYM
             dynsym_off = Some(sh_offset);
             dynsym_size = Some(sh_size);
             if sh_entsize > 0 {
                 dynsym_entsize = sh_entsize;
             }
-        } else if name == ".dynstr" && sh_type == 3 {   // SHT_STRTAB
+        } else if name == ".dynstr" && sh_type == 3 {
+            // SHT_STRTAB
             dynstr_off = Some(sh_offset);
         }
     }
 
-    let dynsym_off = dynsym_off.ok_or_else(|| io::Error::new(
-        io::ErrorKind::NotFound, ".dynsym not found",
-    ))?;
-    let dynstr_off = dynstr_off.ok_or_else(|| io::Error::new(
-        io::ErrorKind::NotFound, ".dynstr not found",
-    ))?;
+    let dynsym_off =
+        dynsym_off.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, ".dynsym not found"))?;
+    let dynstr_off =
+        dynstr_off.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, ".dynstr not found"))?;
 
     // 遍历 dynsym
     let sym_count = (dynsym_size.unwrap() / dynsym_entsize) as usize;
@@ -600,8 +675,9 @@ fn find_symbol_in_elf(elf: &[u8], symbol: &str) -> io::Result<u64> {
         if sym_offset + 24 > elf.len() {
             break;
         }
-        let st_name = u32::from_le_bytes(elf[sym_offset..sym_offset+4].try_into().unwrap()) as usize;
-        let st_value = u64::from_le_bytes(elf[sym_offset+8..sym_offset+16].try_into().unwrap());
+        let st_name =
+            u32::from_le_bytes(elf[sym_offset..sym_offset + 4].try_into().unwrap()) as usize;
+        let st_value = u64::from_le_bytes(elf[sym_offset + 8..sym_offset + 16].try_into().unwrap());
 
         if st_name == 0 || st_value == 0 {
             continue;
@@ -611,7 +687,9 @@ fn find_symbol_in_elf(elf: &[u8], symbol: &str) -> io::Result<u64> {
         if name_start >= elf.len() {
             continue;
         }
-        let name_end = elf[name_start..].iter().position(|&b| b == 0)
+        let name_end = elf[name_start..]
+            .iter()
+            .position(|&b| b == 0)
             .map(|e| name_start + e)
             .unwrap_or(elf.len());
         let name = std::str::from_utf8(&elf[name_start..name_end]).unwrap_or("");
@@ -633,8 +711,14 @@ extern "C" {
     fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
 }
 
-unsafe fn ptrace(request: i32, pid: i32, addr: *mut libc_void, data: *mut libc_void) -> i64 {
-    ptrace(request, pid, addr, data)
+/// Phase 1 修复：重命名 wrapper 避免 extern fn 与 unsafe fn 同名冲突
+/// 并在内部用 unsafe {} 包裹（Rust 2024 edition 默认 unsafe_op_in_unsafe_fn）
+unsafe fn do_ptrace(request: i32, pid: i32, addr: *mut libc_void, data: *mut libc_void) -> i64 {
+    unsafe { ptrace(request, pid, addr, data) }
+}
+
+unsafe fn do_waitpid(pid: i32, status: *mut i32, options: i32) -> i32 {
+    unsafe { waitpid(pid, status, options) }
 }
 
 #[cfg(test)]

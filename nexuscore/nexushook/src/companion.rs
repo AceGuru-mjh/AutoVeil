@@ -64,7 +64,7 @@ impl CompanionManager {
         let companion = Companion {
             module_id: module_id.to_string(),
             so_path,
-            pid: None,    // TODO: 实际 fork
+            pid: None, // TODO: 实际 fork
             socket_path,
             alive: true,
         };
@@ -141,7 +141,7 @@ extern "C" {
 }
 
 unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
-    kill(pid, sig)
+    unsafe { kill(pid, sig) }
 }
 
 #[cfg(test)]

@@ -31,18 +31,20 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod ptrace_injector;
-pub mod hook_table;
+pub mod art_hook_generator;
 pub mod companion;
+pub mod companion_process;
 pub mod denylist;
+pub mod hook_table;
 pub mod ipc;
+pub mod ptrace_injector;
 pub mod selinux;
 pub mod util;
 pub mod zygote_watcher;
-pub mod companion_process;
 
-pub use ptrace_injector::PtraceInjector;
-pub use hook_table::{HookTable, HookEntry, HookTarget};
+pub use art_hook_generator::ArtHookGenerator;
 pub use companion::CompanionManager;
 pub use denylist::DenyList;
+pub use hook_table::{HookEntry, HookTable, HookTarget};
+pub use ptrace_injector::PtraceInjector;
 pub use zygote_watcher::ZygoteWatcher;
