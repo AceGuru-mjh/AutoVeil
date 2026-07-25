@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="460" viewBox="0 0 880 460" role="img" aria-label="NexusCore four-layer architecture">
+  <defs>
+    <linearGradient id="layer" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#161c24"/>
+      <stop offset="1" stop-color="#11161c"/>
+    </linearGradient>
+  </defs>
+  <rect width="880" height="460" fill="#0a0e13"/>
+  <text x="440" y="34" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#e0e6ed" font-weight="600">NexusCore · 四层分离架构 (Four-Layer Separation)</text>
+  <g font-family="sans-serif" font-size="13" fill="#e0e6ed">
+    <rect x="40" y="60" width="800" height="78" rx="10" fill="url(#layer)" stroke="#2a3644"/>
+    <text x="60" y="84" fill="#00e5ff" font-weight="700">NexusManager (Kotlin / Jetpack Compose)</text>
+    <text x="60" y="106" fill="#8b96a5">Dashboard · Modules · Logs · SuperUser · Settings</text>
+    <text x="60" y="126" fill="#5a6573">MVVM + StateFlow · UDS IPC 客户端 · 断线指数退避重连 · 实时日志流</text>
+
+    <rect x="40" y="152" width="800" height="22" fill="none"/>
+    <g stroke="#00e5ff" stroke-width="1.5" opacity="0.6">
+      <line x1="440" y1="138" x2="440" y2="174"/>
+      <polygon points="440,176 435,168 445,168" fill="#00e5ff"/>
+    </g>
+    <text x="455" y="168" font-size="11" fill="#8b96a5">Unix Domain Socket · Protobuf · SO_PEERCRED 凭证校验</text>
+
+    <rect x="40" y="186" width="800" height="118" rx="10" fill="url(#layer)" stroke="#2a3644"/>
+    <text x="60" y="210" fill="#00e5ff" font-weight="700">NexusDaemon — nexusd (C++17, 用户态 Root 守护进程)</text>
+    <text x="60" y="232" fill="#8b96a5">init 启动 · Watchdog 保活 · PID 文件 · RootEnvironmentDetector</text>
+    <text x="60" y="252" fill="#8b96a5">SELinuxManager (仅放宽 nexus_daemon 域，绝不全局 setenforce 0)</text>
+    <text x="60" y="272" fill="#8b96a5">FileSystemInterceptor: OverlayFS → Bind Mount 降级 → 只读兜底</text>
+    <text x="60" y="292" fill="#8b96a5">ModuleLoader (DMM 优先级排序) · ShellExecutor (独立 Mount NS)</text>
+
+    <rect x="40" y="318" width="800" height="22" fill="none"/>
+    <g stroke="#00e5ff" stroke-width="1.5" opacity="0.6">
+      <line x1="200" y1="304" x2="200" y2="340"/>
+      <line x1="440" y1="304" x2="440" y2="340"/>
+      <line x1="680" y1="304" x2="680" y2="340"/>
+      <polygon points="200,342 195,334 205,334" fill="#00e5ff"/>
+      <polygon points="440,342 435,334 445,334" fill="#00e5ff"/>
+      <polygon points="680,342 675,334 685,334" fill="#00e5ff"/>
+    </g>
+
+    <rect x="40" y="352" width="253" height="78" rx="10" fill="url(#layer)" stroke="#2a3644"/>
+    <text x="60" y="376" fill="#00e5ff" font-weight="700">Module SDK</text>
+    <text x="60" y="396" fill="#8b96a5">manifest.json (DMM)</text>
+    <text x="60" y="414" fill="#8b96a5">capabilities · intents · JSON Schema</text>
+
+    <rect x="313" y="352" width="253" height="78" rx="10" fill="url(#layer)" stroke="#2a3644"/>
+    <text x="333" y="376" fill="#00e5ff" font-weight="700">示例模块</text>
+    <text x="333" y="396" fill="#8b96a5">nexus_prop_editor</text>
+    <text x="333" y="414" fill="#8b96a5">customize / service / verify</text>
+
+    <rect x="586" y="352" width="254" height="78" rx="10" fill="url(#layer)" stroke="#2a3644"/>
+    <text x="606" y="376" fill="#00e5ff" font-weight="700">知识图谱</text>
+    <text x="606" y="396" fill="#8b96a5">web/ 单页站点</text>
+    <text x="606" y="414" fill="#8b96a5">演进路线图</text>
+  </g>
+</svg>

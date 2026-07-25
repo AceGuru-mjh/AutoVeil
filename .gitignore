@@ -1,0 +1,80 @@
+# ============ OS ============
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ IDE / Editor ============
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+*~
+.fleet/
+
+# ============ Build outputs ============
+*.apk
+*.aab
+*.ap_
+*.dex
+*.so
+*.o
+*.obj
+*.a
+*.dylib
+*.exe
+
+# ============ Gradle (manager) ============
+nexuscore/manager/.gradle/
+nexuscore/manager/build/
+nexuscore/manager/app/build/
+nexuscore/manager/local.properties
+nexuscore/manager/.idea/
+nexuscore/manager/*.iml
+nexuscore/manager/.cxx/
+nexuscore/manager/app/.cxx/
+nexuscore/manager/captures/
+
+# ============ CMake / NDK (daemon) ============
+nexuscore/daemon/build/
+nexuscore/daemon/build-*/
+nexuscore/daemon/.cxx/
+*.o
+*.ko
+cmd.exe
+
+# ============ Kotlin / Java ============
+*.class
+hs_err_pid*
+replay_pid*
+
+# ============ Logs ============
+*.log
+logs/
+
+# ============ Keystore / Signing ============
+*.jks
+*.keystore
+!debug.keystore
+keystore.properties
+release.keystore
+
+# ============ Node / Web (web knowledge atlas) ============
+nexuscore/web/node_modules/
+nexuscore/web/dist/
+nexuscore/web/.cache/
+
+# ============ Module packaging ============
+dist/
+*.zip
+!nexuscore/modules/**/*.zip
+
+# ============ Trae / local specs ============
+.trae/
+
+# ============ Misc ============
+*.bak
+*.tmp
+*.cache
