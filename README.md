@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/github/forks/AceGuru-mjh/AutoVeil?style=flat-square&logo=github" alt="forks"/>
   <img src="https://img.shields.io/github/watchers/AceGuru-mjh/AutoVeil?style=flat-square&logo=github" alt="watchers"/>
   <img src="https://img.shields.io/github/license/AceGuru-mjh/AutoVeil?style=flat-square&color=blue" alt="license"/>
+  <img src="https://img.shields.io/badge/License-MIT%20%2B%20Non--Commercial-00e5ff?style=flat-square" alt="license-type"/>
   <img src="https://img.shields.io/github/v/release/AceGuru-mjh/AutoVeil?style=flat-square&include_prereleases" alt="release"/>
   <img src="https://img.shields.io/github/last-commit/AceGuru-mjh/AutoVeil?style=flat-square&logo=git" alt="last-commit"/>
   <img src="https://img.shields.io/github/downloads/AceGuru-mjh/AutoVeil/total?style=flat-square&color=blue&label=%E6%80%BB%E4%B8%8B%E8%BD%BD%E9%87%8F" alt="downloads"/>
@@ -241,7 +242,7 @@ AutoVeil/
 ├── README.md                       # 本文档
 ├── README_en.md                    # 英文文档
 ├── CONTRIBUTING.md                 # 贡献指南
-└── LICENSE                         # GPL-3.0
+└── LICENSE                         # MIT + 非商用附加条款
 ```
 
 ### 部署到设备并验证
@@ -328,8 +329,13 @@ adb shell cat /data/adb/nexuscore/nexusd.log
 
 ## 📄 许可证
 
-本项目基于 [**GPL-3.0**](./LICENSE) 协议开源，Copyright © 2026 AutoVeil / NexusCore Contributors。
+本项目基于 **MIT License + 非商用附加条款** 开源，Copyright © 2026 AutoVeil / NexusCore Contributors，详见 [LICENSE](./LICENSE)。
 
-选择 GPL-3.0 是为了与 Android Root 生态（Magisk / KernelSU / LSPosed 等）保持一致：衍生作品必须以同等协议开源，确保整个生态的可审计性与自由度。
+**简言之**：
+- ✅ **允许**：个人学习、研究、教学、社区非盈利使用、为本项目贡献 PR、个人 Fork 修改
+- ❌ **禁止**：任何形式的商业用途（售卖、付费 SaaS、捆绑商业产品、企业内部用于盈利业务）—— 商业用途需另行申请书面授权
+- 📋 衍生作品必须保留 MIT 文本 + 非商用条款 + 原版权声明
+
+选择 MIT-NC 而非纯 MIT，是为了**防止商业封装转售**（把本项目打包成付费工具售卖是 Root 生态常见的侵权行为）；选择 MIT 而非 GPL，是为了**降低模块开发者迁移门槛**——Magisk 模块作者无需担心 copyleft 传染，可以更自由地基于 NexusCore 开发。这是 Android Root 生态圈内最常用的轻量许可模式。
 
 > ⚠️ 本项目涉及系统级 Root 操作，使用者需自行承担风险。作者不对因使用本工具导致的任何设备损坏、数据丢失或 Bootloop 负责。请务必先阅读各 Spec 的"风险与缓解"章节，并在测试设备上验证。

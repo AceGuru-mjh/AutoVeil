@@ -107,6 +107,13 @@ Bug reports should include: device model, Android version, root provider (Magisk
 
 ## 📄 License
 
-Licensed under [GPL-3.0](./LICENSE), Copyright © 2026 AutoVeil / NexusCore Contributors. GPL-3.0 is chosen to align with the Android Root ecosystem (Magisk / KernelSU / LSPosed): derivatives must remain open-source under the same license.
+Licensed under the **MIT License with Non-Commercial Clause**, Copyright © 2026 AutoVeil / NexusCore Contributors. See [LICENSE](./LICENSE).
+
+**In short**:
+- ✅ **Allowed**: personal study, research, teaching, non-profit community use, contributing PRs, personal forks
+- ❌ **Prohibited**: any commercial use (selling, paid SaaS, bundling with commercial products, internal enterprise use for profit) — requires separate written license
+- 📋 Derivatives must retain the MIT text + Non-Commercial Clause + original copyright
+
+MIT-NC is chosen over plain MIT to **prevent commercial repackaging** (a common abuse in the Root ecosystem where open tools get resold as paid products), and over GPL to **lower the barrier for module developers** — Magisk module authors can build on NexusCore without copyleft concerns, the lightweight license model most common in the Android Root ecosystem.
 
 > ⚠️ This project performs system-level Root operations. Use at your own risk — the authors are not liable for device damage, data loss, or bootloops. Read the "Risks & Mitigations" sections of each spec and validate on a test device first.
