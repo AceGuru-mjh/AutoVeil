@@ -1,0 +1,19 @@
+{
+  "id": "nexus_hosts_editor",
+  "name": "NexusHosts Editor",
+  "version": "1.0.0",
+  "versionCode": 1,
+  "author": "NexusCore Team",
+  "description": "示例模块：覆盖 /system/etc/hosts 实现 DNS 劫持/屏蔽（Android 14+ 上比 build.prop 更可靠）",
+  "min_nexus_version": "1.0",
+  "priority": 100,
+  "enabled": true,
+  "capabilities": [
+    "EXECUTE_SHELL",
+    "MOUNT_FILESYSTEM"
+  ],
+  "intents": [
+    { "action": "SYSTEM_BOOT_COMPLETED", "priority": 10 }
+  ],
+  "homepage": "https://github.com/AceGuru-mjh/AutoVeil"
+}
