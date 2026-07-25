@@ -5,13 +5,14 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
-import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.lifecycle.lifecycleScope
 import com.nexus.manager.data.model.SuPolicy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -26,6 +27,8 @@ import kotlinx.coroutines.launch
  * 使用传统 View 而非 Compose，避免 Compose 依赖问题。
  */
 class SuRequestActivity : Activity() {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     companion object {
         private const val TAG = "SuRequestActivity"
@@ -127,7 +130,7 @@ class SuRequestActivity : Activity() {
         val packageName = intent?.getStringExtra(EXTRA_PACKAGE_NAME) ?: return
         val uid = intent?.getIntExtra(EXTRA_UID, -1) ?: return
 
-        lifecycleScope.launch {
+        scope.launch {
             val app = application as? NexusApp
             app?.repository?.setSuPolicy(packageName, uid, policy, timeoutSec)
             finish()
