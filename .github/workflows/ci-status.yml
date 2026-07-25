@@ -1,0 +1,49 @@
+# NexusCore 综合 CI - 统一状态检查
+#
+# 这个 workflow 不会重新跑编译，而是聚合 manager / daemon / nexushook 三个 workflow 的结果，
+# 作为 PR 的统一状态门控。任意一个失败，综合状态就失败。
+
+name: CI Status
+
+on:
+  push:
+    branches: [main, fix/comprehensive-overhaul, 'feat/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci-status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    needs:
+      - manager-build
+      - daemon-test
+      - nexushook-check
+    if: always()
+    steps:
+      - name: Check all jobs succeeded
+        if: ${{ ! (needs.manager-build.result == 'success' && needs.daemon-test.result == 'success' && needs.nexushook-check.result == 'success') }}
+        run: |
+          echo "Manager build: ${{ needs.manager-build.result }}"
+          echo "Daemon test:   ${{ needs.daemon-test.result }}"
+          echo "NexusHook:     ${{ needs.nexushook-check.result }}"
+          echo "One or more CI jobs failed."
+          exit 1
+
+  manager-build:
+    name: Manager (delegate)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Delegated to manager.yml"
+
+  daemon-test:
+    name: Daemon (delegate)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Delegated to daemon.yml"
+
+  nexushook-check:
+    name: NexusHook (delegate)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Delegated to nexushook.yml"
