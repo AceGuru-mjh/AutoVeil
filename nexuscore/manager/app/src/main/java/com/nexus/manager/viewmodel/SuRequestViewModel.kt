@@ -52,9 +52,22 @@ class SuRequestViewModel(
         }
     }
 
+    /**
+     * 整改 B5：原 dismiss() 直接 drop 队列，既不通知 daemon 也不持久化策略，
+     * daemon 端会一直等待响应直到自己超时；这期间请求方 app 一直挂起。
+     *
+     * 改为显式 DENY + 短超时（60s），让 daemon 立即解除请求方阻塞，
+     * 同时不污染长期策略表（timeoutSec=60 表示 60s 后此 DENY 自动失效）。
+     */
     fun dismiss() {
-        // 用户手动关闭对话框 = 视为拒绝（不写入策略，但不再弹）
-        _pending.value = _pending.value.drop(1)
+        val req = current ?: return
+        viewModelScope.launch {
+            runCatching {
+                repo.setSuPolicy(req.packageName, req.uid, SuPolicy.DENY, timeoutSec = 60)
+            }
+            _messages.trySend("${req.packageName} 已稍后处理（短期拒绝 60s）")
+            _pending.value = _pending.value.drop(1)
+        }
     }
 
     private fun restartSubscription() {

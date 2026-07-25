@@ -1,0 +1,8 @@
+id=nexuscore_daemon
+name=NexusCore Daemon
+version=v1.0.0
+versionCode=1
+author=NexusCore Team
+description=NexusCore userspace module runtime daemon. Requires Magisk/KSU/APatch as underlying root provider.
+updateJson=
+support=https://github.com/AceGuru-mjh/AutoVeil

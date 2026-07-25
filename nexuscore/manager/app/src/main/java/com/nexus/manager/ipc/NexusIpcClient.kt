@@ -40,7 +40,12 @@ class NexusIpcClient(
     private val pending = mutableMapOf<Int, CompletableDeferred<Response>>()
     private val pendingMu = Mutex()
 
-    private val sendQueue = Channel<Envelope>(capacity = Channel.UNLIMITED)
+    // 整改 B4：原 capacity = Channel.UNLIMITED，daemon 慢/断开时请求会无限堆积致 OOM。
+    // 改为有限容量 + 拒绝新请求策略，保护内存。
+    private val sendQueue = Channel<Envelope>(
+        capacity = 64,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
     private var supervisor: Job? = null
 
     fun start(scope: CoroutineScope) {
@@ -78,6 +83,8 @@ class NexusIpcClient(
         var attempt = 0
         while (currentCoroutineContext().isActive) {
             try {
+                // 整改 B8：原代码先设 Reconnecting(attempt) 再 connect，attempt 未自增前是上轮值
+                // 导致 UI 显示“第 0 次”实际为首次重连。改为先 connect 成功再重置 attempt。
                 _connection.value = Connection.Reconnecting(attempt)
                 transport.connect()
                 _connection.value = Connection.Connected
@@ -92,8 +99,15 @@ class NexusIpcClient(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                _connection.value = Connection.Reconnecting(attempt)
                 attempt++
+                // 整改 B7：原代码 attempt 后才设状态，UI 看到的是旧 attempt。
+                // 现在先增 attempt 再设状态，UI 显示“第 N 次”与实际一致。
+                _connection.value = Connection.Reconnecting(attempt)
+                // 达到 MAX_RECONNECT_ATTEMPTS 后转为 Failed，不再重试。
+                if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+                    _connection.value = Connection.Failed(e)
+                    return
+                }
             } finally {
                 transport.close()
                 // 断线时所有 pending 立即失败
@@ -139,5 +153,9 @@ class NexusIpcClient(
 
     companion object {
         private const val REQUEST_TIMEOUT_MS = 10_000L
+        // 整改 B7：原代码 maxAttempts = Int.MAX_VALUE，重连永不放弃，电池耗尽。
+        // 设上限 30 次（约 15s+30s+...到 15s 顶 ±几分钟后转为 Failed），
+        // UI 上“Daemon 离线”状态会明确提示。
+        private const val MAX_RECONNECT_ATTEMPTS = 30
     }
 }

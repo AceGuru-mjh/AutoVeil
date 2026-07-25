@@ -92,13 +92,17 @@ class ModulesViewModel(
     /**
      * 安装本地 ZIP。
      *
+     * 整改 B12：原代码用 runCatching 包裹一个已返回 Result 的调用，外层 getOrElse
+     * 永远不会触发（除非 _lastInstall.value = 赋值抛异常），意图混乱。
+     * 改为直接 try/catch，错误链清晰。
+     *
      * @param localPath 已复制到 Daemon 可访问目录的 ZIP 绝对路径
      */
     fun installFromZip(localPath: String) {
         if (_installing.value) return
         viewModelScope.launch {
             _installing.value = true
-            val result = runCatching {
+            val result = try {
                 val resp = repo.installModule(localPath)
                 if (resp.isSuccess) {
                     val r = resp.getOrThrow()
@@ -106,7 +110,9 @@ class ModulesViewModel(
                 } else {
                     InstallResult(success = false, error = resp.exceptionOrNull()?.message ?: "安装失败")
                 }
-            }.getOrElse { InstallResult(success = false, error = it.message ?: "安装失败") }
+            } catch (e: Exception) {
+                InstallResult(success = false, error = e.message ?: "安装失败")
+            }
             _lastInstall.value = result
             _messages.trySend(
                 if (result.success) "安装成功${if (result.needReboot) "，重启后生效" else ""}"

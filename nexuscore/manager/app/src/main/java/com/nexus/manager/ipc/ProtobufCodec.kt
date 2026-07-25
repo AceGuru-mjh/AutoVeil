@@ -41,7 +41,13 @@ object ProtobufCodec {
     private fun readFully(t: IpcTransport, b: ByteArray, off: Int, len: Int): Int {
         var read = 0
         while (read < len) {
-            val n = t.read(b, off + read, len - read)
+            // 整改 B13：read() 现在在 EOF/未连接时直接抛 IOException，
+            // 这里只需捕获并返回已读字节数，让上层判断是否完整。
+            val n = try {
+                t.read(b, off + read, len - read)
+            } catch (e: IOException) {
+                break
+            }
             if (n <= 0) break
             read += n
         }
