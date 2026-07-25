@@ -96,11 +96,13 @@ target_include_directories(nexusd PRIVATE
     ${CMAKE_BINARY_DIR}/proto
 )
 
-# Android 系统库
-target_link_libraries(nexusd PRIVATE
-    log       # __android_log_print
-    cutils    # property_get 等
-)
+# Android 系统库（仅 Android 平台链接，host 平台不需要）
+if(ANDROID)
+    target_link_libraries(nexusd PRIVATE
+        log       # __android_log_print
+        cutils    # property_get 等
+    )
+endif()
 
 # Phase 2: boot_patcher 用 SHA1，需要链接 libssl/libcrypto
 # host 平台用 OpenSSL，Android NDK 用 BoringSSL
@@ -134,7 +136,9 @@ target_include_directories(nexuscli PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/third_party
 )
-target_link_libraries(nexuscli PRIVATE log)
+if(ANDROID)
+    target_link_libraries(nexuscli PRIVATE log)
+endif()
 
 # ============ su (SU 客户端二进制) ============
 # Phase 3：独立的 su 二进制，安装在 /system/bin/su
@@ -147,7 +151,9 @@ target_include_directories(su PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/third_party
 )
-target_link_libraries(su PRIVATE log)
+if(ANDROID)
+    target_link_libraries(su PRIVATE log)
+endif()
 
 # ============ nexuspolicy (SELinux 策略工具，替代 magiskpolicy) ============
 add_executable(nexuspolicy
@@ -160,7 +166,9 @@ target_include_directories(nexuspolicy PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/third_party
 )
-target_link_libraries(nexuspolicy PRIVATE log)
+if(ANDROID)
+    target_link_libraries(nexuspolicy PRIVATE log)
+endif()
 
 # ============ 单元测试（仅在非 Android 平台编译） ============
 if(NOT ANDROID)
